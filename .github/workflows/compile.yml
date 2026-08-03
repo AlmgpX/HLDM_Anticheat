@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   AMXX_BUILD: "5479"
@@ -19,8 +19,25 @@ jobs:
   compile:
     runs-on: windows-2022
     steps:
-      - name: Checkout
+      - name: Checkout PR branch
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Repair imported detector source once
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          python tools/patch_detector_source.py
+
+          if (-not (git diff --quiet -- src/hldm_detector.sma)) {
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add src/hldm_detector.sma
+              git commit -m "Fix detector Pawn identifiers"
+              git push origin "HEAD:$env:GITHUB_HEAD_REF"
+          }
 
       - name: Repository contract and PowerShell parse
         shell: pwsh
@@ -127,7 +144,6 @@ jobs:
           Copy-Item "build\*.amxx" "$package\addons\amxmodx\plugins\"
           Copy-Item "configs\plugins\*.cfg" "$package\addons\amxmodx\configs\plugins\"
           Copy-Item "deploy\*.ps1" "$package\deploy\"
-          Copy-Item "deploy\*.cfg" "$package\deploy\" -ErrorAction SilentlyContinue
           Copy-Item README.md, CHANGELOG.md, LICENSE $package
           Copy-Item "docs\*.md" "$package\docs\"
 
