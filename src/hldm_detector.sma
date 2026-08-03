@@ -659,7 +659,7 @@ stock bool:IsExempt(id)
 stock CountEvents(id)
 {
     new total = 0;
-    for (new signal = 0; signal < Signal_Count; signal++)
+    for (new signal = 0; signal < _:Signal_Count; signal++)
     {
         total += g_signalCount[id][signal];
     }
@@ -670,7 +670,7 @@ stock CountEvents(id)
 stock CountCategories(mask)
 {
     new count = 0;
-    for (new bit = 0; bit < Signal_Count; bit++)
+    for (new bit = 0; bit < _:Signal_Count; bit++)
     {
         if (mask & (1 << bit))
         {
@@ -759,7 +759,7 @@ stock ResetPlayer(id)
     g_lastShotTarget[id] = 0;
     g_categoryMask[id] = 0;
 
-    for (new signal = 0; signal < Signal_Count; signal++)
+    for (new signal = 0; signal < _:Signal_Count; signal++)
     {
         g_signalCount[id][signal] = 0;
     }
@@ -774,7 +774,7 @@ stock ResetEvidence(id)
     g_lastShotTarget[id] = 0;
     g_categoryMask[id] = 0;
 
-    for (new signal = 0; signal < Signal_Count; signal++)
+    for (new signal = 0; signal < _:Signal_Count; signal++)
     {
         g_signalCount[id][signal] = 0;
     }
