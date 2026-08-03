@@ -1,11 +1,18 @@
 # Build output
 build/*.amxx
+build/*.zip
+build-compiler.log
+package/
 .amxx/
 
 # Local server/runtime files
 *.vault
 *.log
 *.dem
+
+# Python
+__pycache__/
+*.pyc
 
 # Editors and OS
 .vscode/

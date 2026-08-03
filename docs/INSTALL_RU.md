@@ -1,8 +1,14 @@
 # Установка на Windows
 
-## 1. Проверить AMX Mod X
+## 1. Серверная цепочка
 
-В серверной консоли:
+Плагин не запускается сам по себе. Нужна цепочка:
+
+```text
+HLDS/ReHLDS -> Metamod -> AMX Mod X -> hldm_trap.amxx
+```
+
+В серверной консоли проверь:
 
 ```text
 meta list
@@ -10,22 +16,28 @@ amxx version
 amxx modules
 ```
 
-Нужны модули `Fakemeta`, `Ham Sandwich` и `nVault`. Обычно они входят в базовый AMX Mod X и подгружаются автоматически по include-зависимостям плагина.
+Нужны модули `Fakemeta`, `Ham Sandwich` и `nVault`. Они входят в базовый AMX Mod X и обычно загружаются автоматически по зависимостям плагина.
 
 ## 2. Компиляция вручную
 
-Положить `src/hldm_trap.sma` в:
+Положи `src/hldm_trap.sma` в:
 
 ```text
 Half-Life\valve\addons\amxmodx\scripting\
 ```
 
-Перетащить файл на `compile.exe` либо запустить `amxxpc.exe`. Результат искать в `scripting\compiled\` или рядом с исходником, в зависимости от способа запуска.
+Запусти `amxxpc.exe hldm_trap.sma`. Готовый `hldm_trap.amxx` появится рядом с исходником.
 
-Для автоматической сборки из репозитория:
+Сборка из репозитория:
 
 ```powershell
 .\tools\build_windows.ps1 -AmxxRoot "E:\SteamLibrary\steamapps\common\Half-Life\valve"
+```
+
+Результат:
+
+```text
+build\hldm_trap.amxx
 ```
 
 ## 3. Установка
@@ -36,31 +48,59 @@ Half-Life\valve\addons\amxmodx\scripting\
 
 Скрипт:
 
-- проверит наличие AMXX;
-- скопирует `build\hldm_trap.amxx`;
-- скопирует конфиг;
-- сделает резервную копию `plugins.ini`;
-- добавит строку `hldm_trap.amxx`, если её ещё нет.
+- проверяет AMXX и собранный `.amxx`;
+- копирует плагин;
+- копирует AutoExecConfig в `addons/amxmodx/configs/plugins/hldm_trap.cfg`;
+- делает резервную копию `plugins.ini`;
+- добавляет `hldm_trap.amxx` без дубликатов.
 
-## 4. Проверка
-
-После смены карты:
+## 4. Проверка после смены карты
 
 ```text
 amxx plugins
-amxx cvars HLDM Trap
+amxx modules
+amxx cvars
 ```
 
-Затем:
+В `amxx plugins` плагин должен иметь статус `running`, а не `bad load`.
+
+Проверка команд:
 
 ```text
 status
-amx_trap #USERID
 amx_trap_list
+amx_trap #USERID
+amx_untrap #USERID
 ```
 
-## 5. Откат
+## 5. Проверка пути конфига
+
+В серверной консоли:
+
+```text
+hldm_trap_outgoing_scale
+hldm_trap_protect_admins
+hldm_trap_auto_trap_custom_models
+```
+
+Значения должны совпадать с:
+
+```text
+valve\addons\amxmodx\configs\plugins\hldm_trap.cfg
+```
+
+Старый путь `configs\hldm_trap.cfg` не используется `AutoExecConfig`.
+
+## 6. Откат
 
 ```powershell
 .\deploy\uninstall_windows.ps1 -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life"
+```
+
+Удалить также nVault со списком целей:
+
+```powershell
+.\deploy\uninstall_windows.ps1 `
+  -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life" `
+  -RemoveVault
 ```

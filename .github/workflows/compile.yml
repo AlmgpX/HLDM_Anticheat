@@ -11,7 +11,9 @@ permissions:
 
 env:
   AMXX_BUILD: "5479"
+  AMXX_TAG: "1.10.0.5479"
   AMXX_ARCHIVE: "amxmodx-1.10.0-git5479-base-linux.tar.gz"
+  PLUGIN_VERSION: "0.2.0"
 
 jobs:
   compile:
@@ -21,37 +23,68 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Repository contract
-        run: python3 tools/check_contract.py
+        run: |
+          python3 -m py_compile tools/check_contract.py
+          python3 tools/check_contract.py
 
-      - name: Install 32-bit runtime
+      - name: Install 32-bit runtime and packaging tools
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y libc6-i386 lib32stdc++6
+          sudo apt-get install -y libc6-i386 lib32stdc++6 zip
 
-      - name: Download AMX Mod X compiler
+      - name: Download official AMX Mod X compiler
+        shell: bash
         run: |
-          curl --fail --location --retry 3 \
-            --output /tmp/amxx.tar.gz \
-            "https://www.amxmodx.org/amxxdrop/1.10/${AMXX_ARCHIVE}"
+          set -euxo pipefail
+          PRIMARY="https://github.com/alliedmodders/amxmodx/releases/download/${AMXX_TAG}/${AMXX_ARCHIVE}"
+          FALLBACK="https://www.amxmodx.org/amxxdrop/1.10/${AMXX_ARCHIVE}"
+
+          if ! curl --fail --location --retry 3 --output /tmp/amxx.tar.gz "$PRIMARY"; then
+            curl --fail --location --retry 3 --output /tmp/amxx.tar.gz "$FALLBACK"
+          fi
+
+          test -s /tmp/amxx.tar.gz
           mkdir -p .amxx
           tar -xzf /tmp/amxx.tar.gz -C .amxx
           chmod +x .amxx/addons/amxmodx/scripting/amxxpc
 
       - name: Compile plugin
+        shell: bash
         run: |
           set -euxo pipefail
           SCRIPTING="$PWD/.amxx/addons/amxmodx/scripting"
           cp src/hldm_trap.sma "$SCRIPTING/hldm_trap.sma"
           cd "$SCRIPTING"
-          ./amxxpc hldm_trap.sma
-          test -f hldm_trap.amxx
+          ./amxxpc hldm_trap.sma | tee "$GITHUB_WORKSPACE/build-compiler.log"
+          test -s hldm_trap.amxx
           mkdir -p "$GITHUB_WORKSPACE/build"
           cp hldm_trap.amxx "$GITHUB_WORKSPACE/build/hldm_trap.amxx"
 
-      - name: Upload plugin
+      - name: Build install package
+        shell: bash
+        run: |
+          set -euxo pipefail
+          PACKAGE="$PWD/package"
+          mkdir -p "$PACKAGE/addons/amxmodx/plugins"
+          mkdir -p "$PACKAGE/addons/amxmodx/configs/plugins"
+          mkdir -p "$PACKAGE/docs"
+
+          cp build/hldm_trap.amxx "$PACKAGE/addons/amxmodx/plugins/"
+          cp configs/plugins/hldm_trap.cfg "$PACKAGE/addons/amxmodx/configs/plugins/"
+          cp README.md CHANGELOG.md LICENSE "$PACKAGE/"
+          cp docs/INSTALL_RU.md docs/TEST_PLAN.md "$PACKAGE/docs/"
+
+          cd "$PACKAGE"
+          zip -r "$GITHUB_WORKSPACE/build/hldm-anticheat-${PLUGIN_VERSION}.zip" .
+          test -s "$GITHUB_WORKSPACE/build/hldm-anticheat-${PLUGIN_VERSION}.zip"
+
+      - name: Upload plugin and package
         uses: actions/upload-artifact@v4
         with:
-          name: hldm-trap-amxx-${{ env.AMXX_BUILD }}
-          path: build/hldm_trap.amxx
+          name: hldm-anticheat-${{ env.PLUGIN_VERSION }}-amxx-${{ env.AMXX_BUILD }}
+          path: |
+            build/hldm_trap.amxx
+            build/hldm-anticheat-${{ env.PLUGIN_VERSION }}.zip
+            build-compiler.log
           if-no-files-found: error

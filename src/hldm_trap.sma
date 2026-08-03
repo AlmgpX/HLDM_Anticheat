@@ -4,13 +4,17 @@
 #include <hamsandwich>
 #include <nvault>
 
+#pragma semicolon 1
+
 #define PLUGIN_NAME    "HLDM Trap"
-#define PLUGIN_VERSION "0.1.0"
+#define PLUGIN_VERSION "0.2.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_PLAYERS 32
-#define TASK_HUD 9100
+#define TASK_TICK 9100
+#define TASK_HUD 9101
 #define TASK_MODEL_BASE 9200
+#define TASK_AUTH_BASE 9300
 
 enum TrapPhase
 {
@@ -19,18 +23,25 @@ enum TrapPhase
     TrapPhase_Hard
 };
 
+new bool:g_inServer[MAX_PLAYERS + 1];
 new bool:g_trapped[MAX_PLAYERS + 1];
 new TrapPhase:g_phase[MAX_PLAYERS + 1];
 new Float:g_phaseUntil[MAX_PLAYERS + 1];
 new g_authId[MAX_PLAYERS + 1][40];
+new g_trapReason[MAX_PLAYERS + 1][32];
+new g_modelViolations[MAX_PLAYERS + 1];
 new g_vault = INVALID_HANDLE;
 
 new g_pcvarEnabled;
 new g_pcvarPersist;
+new g_pcvarProtectAdmins;
+new g_pcvarAllowSelf;
+new g_pcvarAllowBots;
 new g_pcvarOutgoingScale;
 new g_pcvarIncomingScale;
 new g_pcvarJumpFailChance;
 new g_pcvarAttackFailChance;
+new g_pcvarAttack2FailChance;
 new g_pcvarStrafeFlipChance;
 new g_pcvarPunishMin;
 new g_pcvarPunishMax;
@@ -39,6 +50,8 @@ new g_pcvarRecoveryMax;
 new g_pcvarHud;
 new g_pcvarForceStandardModels;
 new g_pcvarForcedModel;
+new g_pcvarAutoTrapCustomModels;
+new g_pcvarCustomModelThreshold;
 
 new const g_standardModels[][] =
 {
@@ -58,16 +71,24 @@ public plugin_init()
 {
     register_plugin(PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_AUTHOR);
 
-    register_concmd("amx_trap", "CmdTrap", ADMIN_RCON, "<name|#userid|SteamID> - enable trap");
-    register_concmd("amx_untrap", "CmdUntrap", ADMIN_RCON, "<name|#userid|SteamID> - disable trap");
-    register_concmd("amx_trap_list", "CmdTrapList", ADMIN_RCON, "- list trapped players");
+    register_concmd("amx_trap", "CmdTrap", ADMIN_RCON, "<name|#userid|SteamID> - enable trap for connected client");
+    register_concmd("amx_untrap", "CmdUntrap", ADMIN_RCON, "<name|#userid|SteamID> - disable trap for connected client");
+    register_concmd("amx_trap_id", "CmdTrapId", ADMIN_RCON, "<SteamID> - persistently trap SteamID, online or offline");
+    register_concmd("amx_untrap_id", "CmdUntrapId", ADMIN_RCON, "<SteamID> - remove persistent trap, online or offline");
+    register_concmd("amx_trap_list", "CmdTrapList", ADMIN_RCON, "- list connected trapped clients");
+    register_concmd("amx_trap_start", "CmdTrapStart", ADMIN_RCON, "- enable all trap effects");
+    register_concmd("amx_trap_stop", "CmdTrapStop", ADMIN_RCON, "- emergency stop without deleting targets");
 
     g_pcvarEnabled = register_cvar("hldm_trap_enabled", "1");
     g_pcvarPersist = register_cvar("hldm_trap_persist", "1");
+    g_pcvarProtectAdmins = register_cvar("hldm_trap_protect_admins", "1");
+    g_pcvarAllowSelf = register_cvar("hldm_trap_allow_self", "0");
+    g_pcvarAllowBots = register_cvar("hldm_trap_allow_bots", "0");
     g_pcvarOutgoingScale = register_cvar("hldm_trap_outgoing_scale", "0.08");
     g_pcvarIncomingScale = register_cvar("hldm_trap_incoming_scale", "1.75");
     g_pcvarJumpFailChance = register_cvar("hldm_trap_jump_fail_chance", "12");
     g_pcvarAttackFailChance = register_cvar("hldm_trap_attack_fail_chance", "6");
+    g_pcvarAttack2FailChance = register_cvar("hldm_trap_attack2_fail_chance", "8");
     g_pcvarStrafeFlipChance = register_cvar("hldm_trap_strafe_flip_chance", "4");
     g_pcvarPunishMin = register_cvar("hldm_trap_punish_min_seconds", "18");
     g_pcvarPunishMax = register_cvar("hldm_trap_punish_max_seconds", "35");
@@ -76,12 +97,16 @@ public plugin_init()
     g_pcvarHud = register_cvar("hldm_trap_hud", "1");
     g_pcvarForceStandardModels = register_cvar("hldm_trap_force_standard_models", "1");
     g_pcvarForcedModel = register_cvar("hldm_trap_forced_model", "gordon");
+    g_pcvarAutoTrapCustomModels = register_cvar("hldm_trap_auto_trap_custom_models", "1");
+    g_pcvarCustomModelThreshold = register_cvar("hldm_trap_custom_model_threshold", "1");
 
+    // AMXX executes this as addons/amxmodx/configs/plugins/hldm_trap.cfg.
     AutoExecConfig(true, "hldm_trap");
 
     RegisterHam(Ham_TakeDamage, "player", "OnPlayerTakeDamage", false);
     register_forward(FM_CmdStart, "OnCmdStart", false);
 
+    set_task(1.0, "TaskTick", TASK_TICK, _, _, "b");
     set_task(3.0, "TaskShowHud", TASK_HUD, _, _, "b");
 
     g_vault = nvault_open("hldm_trap_targets");
@@ -100,34 +125,40 @@ public plugin_end()
     }
 }
 
+public client_connect(id)
+{
+    ResetClientState(id);
+}
+
 public client_authorized(id, const authid[])
 {
     copy(g_authId[id], charsmax(g_authId[]), authid);
 
-    if (equali(authid, "BOT") || equali(authid, "HLTV"))
+    if (g_trapped[id] && get_pcvar_num(g_pcvarPersist) && g_vault != INVALID_HANDLE && IsPersistentAuthId(authid))
     {
-        return;
+        nvault_set(g_vault, authid, "1");
     }
 
-    if (get_pcvar_num(g_pcvarPersist) && g_vault != INVALID_HANDLE && nvault_get(g_vault, authid) == 1)
-    {
-        EnableTrap(id, 0, false);
-    }
+    SchedulePersistentRestore(id);
 }
 
 public client_putinserver(id)
 {
+    g_inServer[id] = true;
+    g_modelViolations[id] = 0;
+
     remove_task(TASK_MODEL_BASE + id);
     set_task(1.0, "TaskEnforceModel", TASK_MODEL_BASE + id);
+
+    SchedulePersistentRestore(id);
 }
 
 public client_disconnected(id, bool:drop, message[], maxlen)
 {
     remove_task(TASK_MODEL_BASE + id);
-    g_trapped[id] = false;
-    g_phase[id] = TrapPhase_Soft;
-    g_phaseUntil[id] = 0.0;
-    g_authId[id][0] = '^0';
+    remove_task(TASK_AUTH_BASE + id);
+
+    ResetClientState(id);
 }
 
 public client_infochanged(id)
@@ -149,6 +180,29 @@ public TaskEnforceModel(taskId)
     }
 }
 
+public TaskRestorePersistent(taskId)
+{
+    new id = taskId - TASK_AUTH_BASE;
+    if (!is_user_connected(id) || !g_inServer[id] || g_trapped[id] || !get_pcvar_num(g_pcvarPersist) || g_vault == INVALID_HANDLE)
+    {
+        return;
+    }
+
+    EnsureAuthId(id);
+    if (!IsPersistentAuthId(g_authId[id]) || nvault_get(g_vault, g_authId[id]) != 1)
+    {
+        return;
+    }
+
+    if (IsProtectedTarget(id))
+    {
+        log_amx("Persistent target <%s> was not restored because the client is protected.", g_authId[id]);
+        return;
+    }
+
+    EnableTrap(id, 0, false, "persistent");
+}
+
 public CmdTrap(id, level, cid)
 {
     if (!cmd_access(id, level, cid, 2))
@@ -160,12 +214,12 @@ public CmdTrap(id, level, cid)
     read_argv(1, argument, charsmax(argument));
 
     new target = cmd_target(id, argument, CMDTARGET_ALLOW_SELF);
-    if (!target)
+    if (!target || !CanAdminTarget(id, target))
     {
         return PLUGIN_HANDLED;
     }
 
-    EnableTrap(target, id, true);
+    EnableTrap(target, id, true, "manual");
     return PLUGIN_HANDLED;
 }
 
@@ -189,6 +243,83 @@ public CmdUntrap(id, level, cid)
     return PLUGIN_HANDLED;
 }
 
+public CmdTrapId(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 2))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    if (g_vault == INVALID_HANDLE)
+    {
+        console_print(id, "[HLDM Trap] nVault is unavailable.");
+        return PLUGIN_HANDLED;
+    }
+
+    new authid[40];
+    read_argv(1, authid, charsmax(authid));
+    trim(authid);
+
+    if (!IsPersistentAuthId(authid))
+    {
+        console_print(id, "[HLDM Trap] Invalid persistent authid: %s", authid);
+        return PLUGIN_HANDLED;
+    }
+
+    new target = FindConnectedByAuthId(authid);
+    if (target && !CanAdminTarget(id, target))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    nvault_set(g_vault, authid, "1");
+
+    if (target)
+    {
+        EnableTrap(target, id, false, "manual-id");
+    }
+
+    console_print(id, "[HLDM Trap] Persistent target added: %s", authid);
+    log_amx("Persistent trap added for <%s> by admin index %d", authid, id);
+    return PLUGIN_HANDLED;
+}
+
+public CmdUntrapId(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 2))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    if (g_vault == INVALID_HANDLE)
+    {
+        console_print(id, "[HLDM Trap] nVault is unavailable.");
+        return PLUGIN_HANDLED;
+    }
+
+    new authid[40];
+    read_argv(1, authid, charsmax(authid));
+    trim(authid);
+
+    if (!IsPersistentAuthId(authid))
+    {
+        console_print(id, "[HLDM Trap] Invalid persistent authid: %s", authid);
+        return PLUGIN_HANDLED;
+    }
+
+    nvault_remove(g_vault, authid);
+
+    new target = FindConnectedByAuthId(authid);
+    if (target)
+    {
+        DisableTrap(target, id, false);
+    }
+
+    console_print(id, "[HLDM Trap] Persistent target removed: %s", authid);
+    log_amx("Persistent trap removed for <%s> by admin index %d", authid, id);
+    return PLUGIN_HANDLED;
+}
+
 public CmdTrapList(id, level, cid)
 {
     if (!cmd_access(id, level, cid, 1))
@@ -197,7 +328,7 @@ public CmdTrapList(id, level, cid)
     }
 
     new count = 0;
-    console_print(id, "[HLDM Trap] Active targets:");
+    console_print(id, "[HLDM Trap] enabled=%d, connected targets:", get_pcvar_num(g_pcvarEnabled));
 
     for (new player = 1; player <= MaxClients; player++)
     {
@@ -206,10 +337,21 @@ public CmdTrapList(id, level, cid)
             continue;
         }
 
-        new name[32], authid[40];
+        new name[32], authid[40], phaseName[16];
         get_user_name(player, name, charsmax(name));
         get_user_authid(player, authid, charsmax(authid));
-        console_print(id, "  #%d  %s  %s  phase=%d", get_user_userid(player), name, authid, _:g_phase[player]);
+        GetPhaseName(g_phase[player], phaseName, charsmax(phaseName));
+
+        console_print(
+            id,
+            "  #%d  %s  %s  phase=%s  reason=%s  model_rejects=%d",
+            get_user_userid(player),
+            name,
+            authid,
+            phaseName,
+            g_trapReason[player],
+            g_modelViolations[player]
+        );
         count++;
     }
 
@@ -218,6 +360,32 @@ public CmdTrapList(id, level, cid)
         console_print(id, "  none");
     }
 
+    return PLUGIN_HANDLED;
+}
+
+public CmdTrapStart(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    set_pcvar_num(g_pcvarEnabled, 1);
+    console_print(id, "[HLDM Trap] Effects enabled.");
+    log_amx("Trap effects enabled by admin index %d", id);
+    return PLUGIN_HANDLED;
+}
+
+public CmdTrapStop(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    set_pcvar_num(g_pcvarEnabled, 0);
+    console_print(id, "[HLDM Trap] Emergency stop active. Targets were not deleted.");
+    log_amx("Trap emergency stop activated by admin index %d", id);
     return PLUGIN_HANDLED;
 }
 
@@ -287,6 +455,12 @@ public OnCmdStart(id, userCmd, randomSeed)
         changed = 1;
     }
 
+    if ((buttons & IN_ATTACK2) && RollScaledChance(get_pcvar_num(g_pcvarAttack2FailChance), severity))
+    {
+        buttons &= ~IN_ATTACK2;
+        changed = 1;
+    }
+
     if (RollScaledChance(get_pcvar_num(g_pcvarStrafeFlipChance), severity))
     {
         new Float:sideMove;
@@ -308,6 +482,17 @@ public OnCmdStart(id, userCmd, randomSeed)
     return FMRES_IGNORED;
 }
 
+public TaskTick()
+{
+    for (new id = 1; id <= MaxClients; id++)
+    {
+        if (is_user_connected(id) && g_trapped[id])
+        {
+            UpdatePhase(id);
+        }
+    }
+}
+
 public TaskShowHud()
 {
     if (!get_pcvar_num(g_pcvarEnabled) || !get_pcvar_num(g_pcvarHud))
@@ -322,8 +507,6 @@ public TaskShowHud()
             continue;
         }
 
-        UpdatePhase(id);
-
         new phaseText[24];
         switch (g_phase[id])
         {
@@ -337,45 +520,136 @@ public TaskShowHud()
     }
 }
 
-stock EnableTrap(target, admin, bool:persist)
+stock EnableTrap(target, admin, bool:persist, const reason[])
 {
-    g_trapped[target] = true;
-    SetPhase(target, TrapPhase_Soft);
-
-    if (persist && get_pcvar_num(g_pcvarPersist) && g_vault != INVALID_HANDLE)
+    if (!is_user_connected(target))
     {
-        EnsureAuthId(target);
-        if (IsPersistentAuthId(g_authId[target]))
-        {
-            nvault_set(g_vault, g_authId[target], "1");
-        }
+        return;
+    }
+
+    EnsureAuthId(target);
+
+    if (!g_trapped[target])
+    {
+        g_trapped[target] = true;
+        SetPhase(target, TrapPhase_Soft);
+    }
+
+    if (reason[0])
+    {
+        copy(g_trapReason[target], charsmax(g_trapReason[]), reason);
+    }
+
+    if (persist && get_pcvar_num(g_pcvarPersist) && g_vault != INVALID_HANDLE && IsPersistentAuthId(g_authId[target]))
+    {
+        nvault_set(g_vault, g_authId[target], "1");
     }
 
     new targetName[32];
     get_user_name(target, targetName, charsmax(targetName));
     console_print(admin, "[HLDM Trap] Enabled for %s (#%d)", targetName, get_user_userid(target));
-    log_amx("Trap enabled for ^"%s^" <%s> by admin index %d", targetName, g_authId[target], admin);
+    log_amx("Trap enabled for ^\"%s^\" <%s> reason=%s by admin index %d", targetName, g_authId[target], g_trapReason[target], admin);
 }
 
 stock DisableTrap(target, admin, bool:removePersistent)
 {
+    if (!is_user_connected(target))
+    {
+        return;
+    }
+
+    EnsureAuthId(target);
+
     g_trapped[target] = false;
     g_phase[target] = TrapPhase_Soft;
     g_phaseUntil[target] = 0.0;
+    g_trapReason[target][0] = '^0';
 
-    if (removePersistent && g_vault != INVALID_HANDLE)
+    if (removePersistent && g_vault != INVALID_HANDLE && IsPersistentAuthId(g_authId[target]))
     {
-        EnsureAuthId(target);
-        if (IsPersistentAuthId(g_authId[target]))
-        {
-            nvault_remove(g_vault, g_authId[target]);
-        }
+        nvault_remove(g_vault, g_authId[target]);
     }
 
     new targetName[32];
     get_user_name(target, targetName, charsmax(targetName));
     console_print(admin, "[HLDM Trap] Disabled for %s (#%d)", targetName, get_user_userid(target));
-    log_amx("Trap disabled for ^"%s^" <%s> by admin index %d", targetName, g_authId[target], admin);
+    log_amx("Trap disabled for ^\"%s^\" <%s> by admin index %d", targetName, g_authId[target], admin);
+}
+
+stock bool:CanAdminTarget(admin, target)
+{
+    if (!get_pcvar_num(g_pcvarAllowBots) && is_user_bot(target))
+    {
+        console_print(admin, "[HLDM Trap] Bots are protected by hldm_trap_allow_bots 0.");
+        return false;
+    }
+
+    if (admin == target && !get_pcvar_num(g_pcvarAllowSelf))
+    {
+        console_print(admin, "[HLDM Trap] Self-targeting is disabled.");
+        return false;
+    }
+
+    if (IsProtectedTarget(target) && !(admin == target && get_pcvar_num(g_pcvarAllowSelf)))
+    {
+        console_print(admin, "[HLDM Trap] Target is protected by admin immunity.");
+        return false;
+    }
+
+    return true;
+}
+
+stock bool:IsProtectedTarget(id)
+{
+    if (!is_user_connected(id))
+    {
+        return true;
+    }
+
+    if (!get_pcvar_num(g_pcvarAllowBots) && is_user_bot(id))
+    {
+        return true;
+    }
+
+    return get_pcvar_num(g_pcvarProtectAdmins) && is_user_admin(id);
+}
+
+stock ResetClientState(id)
+{
+    g_inServer[id] = false;
+    g_trapped[id] = false;
+    g_phase[id] = TrapPhase_Soft;
+    g_phaseUntil[id] = 0.0;
+    g_authId[id][0] = '^0';
+    g_trapReason[id][0] = '^0';
+    g_modelViolations[id] = 0;
+}
+
+stock SchedulePersistentRestore(id)
+{
+    remove_task(TASK_AUTH_BASE + id);
+    set_task(1.5, "TaskRestorePersistent", TASK_AUTH_BASE + id);
+}
+
+stock FindConnectedByAuthId(const authid[])
+{
+    new currentAuthId[40];
+
+    for (new id = 1; id <= MaxClients; id++)
+    {
+        if (!is_user_connected(id))
+        {
+            continue;
+        }
+
+        get_user_authid(id, currentAuthId, charsmax(currentAuthId));
+        if (equali(currentAuthId, authid))
+        {
+            return id;
+        }
+    }
+
+    return 0;
 }
 
 stock SetPhase(id, TrapPhase:phase)
@@ -428,6 +702,16 @@ stock GetSeverity(id)
     return 100;
 }
 
+stock GetPhaseName(TrapPhase:phase, output[], outputLength)
+{
+    switch (phase)
+    {
+        case TrapPhase_Recovery: copy(output, outputLength, "RECOVERY");
+        case TrapPhase_Hard: copy(output, outputLength, "HARD");
+        default: copy(output, outputLength, "SOFT");
+    }
+}
+
 stock bool:RollScaledChance(baseChance, severity)
 {
     baseChance = ClampInt(baseChance, 0, 100);
@@ -439,7 +723,11 @@ stock bool:RollScaledChance(baseChance, severity)
 
 stock EnforceStandardModel(id)
 {
-    if (!get_pcvar_num(g_pcvarForceStandardModels) || !is_user_connected(id) || is_user_bot(id) || is_user_hltv(id))
+    if (!get_pcvar_num(g_pcvarEnabled)
+        || !get_pcvar_num(g_pcvarForceStandardModels)
+        || !is_user_connected(id)
+        || is_user_bot(id)
+        || is_user_hltv(id))
     {
         return;
     }
@@ -447,7 +735,7 @@ stock EnforceStandardModel(id)
     new currentModel[32];
     get_user_info(id, "model", currentModel, charsmax(currentModel));
 
-    if (IsStandardModel(currentModel))
+    if (!currentModel[0] || IsStandardModel(currentModel))
     {
         return;
     }
@@ -460,8 +748,26 @@ stock EnforceStandardModel(id)
         copy(forcedModel, charsmax(forcedModel), "gordon");
     }
 
-    log_amx("Rejected custom player model ^"%s^" from client index %d; forcing ^"%s^"", currentModel, id, forcedModel);
+    g_modelViolations[id]++;
+    log_amx(
+        "Rejected custom player model ^\"%s^\" from client index %d; forcing ^\"%s^\"; count=%d",
+        currentModel,
+        id,
+        forcedModel,
+        g_modelViolations[id]
+    );
+
     set_user_info(id, "model", forcedModel);
+
+    new threshold = ClampInt(get_pcvar_num(g_pcvarCustomModelThreshold), 1, 100);
+    if (get_pcvar_num(g_pcvarAutoTrapCustomModels)
+        && g_modelViolations[id] >= threshold
+        && g_inServer[id]
+        && !g_trapped[id]
+        && !IsProtectedTarget(id))
+    {
+        EnableTrap(id, 0, true, "custom-model");
+    }
 }
 
 stock bool:IsStandardModel(const model[])
@@ -487,12 +793,18 @@ stock EnsureAuthId(id)
 
 stock bool:IsPersistentAuthId(const authid[])
 {
-    return authid[0]
-        && !equali(authid, "BOT")
-        && !equali(authid, "HLTV")
-        && !equali(authid, "STEAM_ID_PENDING")
-        && !equali(authid, "STEAM_ID_LAN")
-        && !equali(authid, "VALVE_ID_LAN");
+    if (!authid[0]
+        || equali(authid, "BOT")
+        || equali(authid, "HLTV")
+        || equali(authid, "STEAM_ID_PENDING")
+        || equali(authid, "STEAM_ID_LAN")
+        || equali(authid, "VALVE_ID_LAN")
+        || equali(authid, "UNKNOWN"))
+    {
+        return false;
+    }
+
+    return containi(authid, "STEAM_") == 0 || containi(authid, "VALVE_") == 0;
 }
 
 stock bool:IsPlayerIndex(id)
