@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   AMXX_BUILD: "5479"
@@ -19,25 +19,8 @@ jobs:
   compile:
     runs-on: windows-2022
     steps:
-      - name: Checkout PR branch
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.head_ref || github.ref_name }}
-
-      - name: Repair imported detector source once
-        if: github.event_name == 'pull_request'
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          python tools/patch_detector_source.py
-
-          if (-not (git diff --quiet -- src/hldm_detector.sma)) {
-              git config user.name "github-actions[bot]"
-              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git add src/hldm_detector.sma
-              git commit -m "Fix detector Pawn identifiers"
-              git push origin "HEAD:$env:GITHUB_HEAD_REF"
-          }
 
       - name: Repository contract and PowerShell parse
         shell: pwsh
@@ -87,7 +70,7 @@ jobs:
               throw "Compiler not found: $compiler"
           }
 
-      - name: Compile all plugins
+      - name: Compile all plugins without warnings
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -127,6 +110,11 @@ jobs:
               }
 
               Copy-Item $temporaryOutput "build\$name.amxx" -Force
+          }
+
+          if (Select-String -Path $log -Pattern '\bwarning\s+\d+:' -Quiet) {
+              Get-Content $log
+              throw "Pawn compiler warnings are not allowed."
           }
 
       - name: Build install package
