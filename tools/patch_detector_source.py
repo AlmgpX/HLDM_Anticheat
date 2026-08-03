@@ -16,6 +16,8 @@ replacements = {
     "engfunc(EngFunc_TraceLine, eye, end, DONT_IGNORE_MONSTERS, id, trace);": "engfunc(EngFunc_TraceLine, eye, traceEnd, DONT_IGNORE_MONSTERS, id, trace);",
     "stock bool:CanSeeTarget(id, target, const Float:start[3], const Float:end[3])": "stock bool:CanSeeTarget(id, target, const Float:traceStart[3], const Float:traceEnd[3])",
     "engfunc(EngFunc_TraceLine, start, end, DONT_IGNORE_MONSTERS, id, trace);": "engfunc(EngFunc_TraceLine, traceStart, traceEnd, DONT_IGNORE_MONSTERS, id, trace);",
+    "signal < Signal_Count": "signal < _:Signal_Count",
+    "bit < Signal_Count": "bit < _:Signal_Count",
 }
 
 changed = False
