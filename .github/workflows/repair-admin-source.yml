@@ -1,0 +1,56 @@
+name: Repair admin source
+
+on:
+  push:
+    paths:
+      - ".github/workflows/repair-admin-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Fix get_user_ping call
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/hldm_admin_tools.sma")
+          text = path.read_text(encoding="utf-8")
+
+          old_decl = '    new name[32], authid[40], ip[32], model[32];\n'
+          new_decl = '    new name[32], authid[40], ip[32], model[32];\n    new ping, loss;\n'
+          if old_decl not in text:
+              raise SystemExit("target declaration not found")
+          text = text.replace(old_decl, new_decl, 1)
+
+          old_info = '    get_user_info(target, "model", model, charsmax(model));\n\n    console_print('
+          new_info = '    get_user_info(target, "model", model, charsmax(model));\n    get_user_ping(target, ping, loss);\n\n    console_print('
+          if old_info not in text:
+              raise SystemExit("target info block not found")
+          text = text.replace(old_info, new_info, 1)
+
+          old_call = '        get_user_ping(target)\n'
+          if old_call not in text:
+              raise SystemExit("invalid ping call not found")
+          text = text.replace(old_call, '        ping\n', 1)
+
+          path.write_text(text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_admin_tools.sma
+          git commit -m "Fix admin target ping lookup"
+          git push origin HEAD:main
