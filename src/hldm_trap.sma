@@ -548,7 +548,7 @@ stock EnableTrap(target, admin, bool:persist, const reason[])
     new targetName[32];
     get_user_name(target, targetName, charsmax(targetName));
     console_print(admin, "[HLDM Trap] Enabled for %s (#%d)", targetName, get_user_userid(target));
-    log_amx("Trap enabled for ^\"%s^\" <%s> reason=%s by admin index %d", targetName, g_authId[target], g_trapReason[target], admin);
+    log_amx("Trap enabled for ^"%s^" <%s> reason=%s by admin index %d", targetName, g_authId[target], g_trapReason[target], admin);
 }
 
 stock DisableTrap(target, admin, bool:removePersistent)
@@ -573,7 +573,7 @@ stock DisableTrap(target, admin, bool:removePersistent)
     new targetName[32];
     get_user_name(target, targetName, charsmax(targetName));
     console_print(admin, "[HLDM Trap] Disabled for %s (#%d)", targetName, get_user_userid(target));
-    log_amx("Trap disabled for ^\"%s^\" <%s> by admin index %d", targetName, g_authId[target], admin);
+    log_amx("Trap disabled for ^"%s^" <%s> by admin index %d", targetName, g_authId[target], admin);
 }
 
 stock bool:CanAdminTarget(admin, target)
@@ -750,7 +750,7 @@ stock EnforceStandardModel(id)
 
     g_modelViolations[id]++;
     log_amx(
-        "Rejected custom player model ^\"%s^\" from client index %d; forcing ^\"%s^\"; count=%d",
+        "Rejected custom player model ^"%s^" from client index %d; forcing ^"%s^"; count=%d",
         currentModel,
         id,
         forcedModel,
