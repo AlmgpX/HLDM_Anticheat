@@ -753,10 +753,12 @@ stock PrintAimStatus(viewer, target, body)
 stock PrintTargetStatus(viewer, target)
 {
     new name[32], authid[40], ip[32], model[32];
+    new ping, loss;
     get_user_name(target, name, charsmax(name));
     get_user_authid(target, authid, charsmax(authid));
     get_user_ip(target, ip, charsmax(ip), 1);
     get_user_info(target, "model", model, charsmax(model));
+    get_user_ping(target, ping, loss);
 
     console_print(
         viewer,
@@ -768,7 +770,7 @@ stock PrintTargetStatus(viewer, target)
         model,
         get_user_health(target),
         get_user_armor(target),
-        get_user_ping(target)
+        ping
     );
     client_print(viewer, print_chat, "[HLDM Admin] #%d %s <%s> model=%s", get_user_userid(target), name, authid, model);
 }
