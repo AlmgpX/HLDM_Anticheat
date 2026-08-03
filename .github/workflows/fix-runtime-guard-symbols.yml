@@ -1,0 +1,38 @@
+name: Fix runtime guard symbols
+
+on:
+  push:
+    paths:
+      - "docs/RUNTIME_GUARD_SYMBOL_FIX_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Rename reserved identifiers
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/hldm_runtime_guard.sma')
+          text = path.read_text(encoding='utf-8')
+          text = text.replace('new Float:viewAngles[3], Float:forward[3], Float:right[3], Float:up[3];', 'new Float:viewAngles[3], Float:forwardVector[3], Float:rightVector[3], Float:upVector[3];')
+          text = text.replace('engfunc(EngFunc_AngleVectors, viewAngles, forward, right, up);', 'engfunc(EngFunc_AngleVectors, viewAngles, forwardVector, rightVector, upVector);')
+          text = text.replace('DotProduct(forward, direction)', 'DotProduct(forwardVector, direction)')
+          text = text.replace('DotProduct(right, direction)', 'DotProduct(rightVector, direction)')
+          path.write_text(text, encoding='utf-8', newline='\n')
+          PY
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_runtime_guard.sma
+          git commit -m "Fix runtime guard reserved identifiers"
+          git push origin HEAD:main
