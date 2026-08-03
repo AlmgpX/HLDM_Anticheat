@@ -1,0 +1,136 @@
+name: Apply Runtime Guard v1.1
+
+on:
+  push:
+    paths:
+      - ".github/workflows/apply-runtime-guard-v11.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Patch Runtime Guard
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/hldm_runtime_guard.sma")
+          text = path.read_text(encoding="utf-8")
+
+          def replace_once(old, new):
+              global text
+              if old not in text:
+                  raise SystemExit("missing anchor: " + old[:100])
+              text = text.replace(old, new, 1)
+
+          replace_once('#define PLUGIN_VERSION "1.0.0"', '#define PLUGIN_VERSION "1.1.0"')
+          replace_once('new g_pcvarDamageCap;', 'new g_pcvarDamageScale;')
+          replace_once(
+              '    register_concmd("amx_guard_unpunish", "CmdUnpunish", ADMIN_RCON, "<name|#userid|SteamID> - remove guard punishment");\n',
+              '    register_concmd("amx_guard_unpunish", "CmdUnpunish", ADMIN_RCON, "<name|#userid|SteamID> - remove guard punishment");\n'
+              '    register_concmd("amx_guard_quick", "CmdQuickPunish", ADMIN_RCON, "- punish last menu-selected player, or open list");\n'
+              '    register_concmd("amx_guard_restore", "CmdQuickRestore", ADMIN_RCON, "- restore last menu-selected player, or open list");\n'
+          )
+          replace_once(
+              '    g_pcvarDamageCap = register_cvar("hldm_guard_damage_cap", "1.0");',
+              '    g_pcvarDamageScale = register_cvar("hldm_guard_damage_scale", "0.01");'
+          )
+          replace_once(
+              '    new Float:cap = ClampFloat(get_pcvar_float(g_pcvarDamageCap), 0.1, 10.0);\n    SetHamParamFloat(4, cap);',
+              '    new Float:scale = ClampFloat(get_pcvar_float(g_pcvarDamageScale), 0.0, 1.0);\n    SetHamParamFloat(4, damage * scale);'
+          )
+
+          anchor = 'public CmdXray(id, level, cid)\n{'
+          quick = '''public CmdQuickPunish(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1) || !IsAdminClient(id))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    new target = g_selected[id];
+    if (!CanPunish(id, target))
+    {
+        client_print(id, print_chat, "[GUARD] Select a player first. Opening list.");
+        ShowPlayerMenu(id);
+        return PLUGIN_HANDLED;
+    }
+
+    MarkPlayer(target, true, "quick-hotkey");
+    AnnouncePunishment(id, target);
+    return PLUGIN_HANDLED;
+}
+
+public CmdQuickRestore(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1) || !IsAdminClient(id))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    new target = g_selected[id];
+    if (!CanPunish(id, target))
+    {
+        client_print(id, print_chat, "[GUARD] Select a player first. Opening list.");
+        ShowPlayerMenu(id);
+        return PLUGIN_HANDLED;
+    }
+
+    UnmarkPlayer(target);
+    server_cmd("amx_untrap #%d", get_user_userid(target));
+    server_exec();
+    client_print(id, print_chat, "[GUARD] #%d restored to normal damage and input.", get_user_userid(target));
+    return PLUGIN_HANDLED;
+}
+
+public CmdXray(id, level, cid)
+{'''
+          replace_once(anchor, quick)
+
+          replace_once(
+              '    console_print(id, "[GUARD] enabled=%d cap=%.1f", get_pcvar_num(g_pcvarEnabled), get_pcvar_float(g_pcvarDamageCap));',
+              '    console_print(id, "[GUARD] enabled=%d outgoing_scale=%.4f", get_pcvar_num(g_pcvarEnabled), get_pcvar_float(g_pcvarDamageScale));'
+          )
+          replace_once(
+              '            console_print(id, "  #%d %s <%s> hardcap=1", get_user_userid(target), name, authid);',
+              '            console_print(id, "  #%d %s <%s> punished=1 scale=%.4f", get_user_userid(target), name, authid, get_pcvar_float(g_pcvarDamageScale));'
+          )
+          replace_once(
+              '    menu_additem(menu, "\\rTRAP + SLAY + 1 DAMAGE CAP", "1");',
+              '    menu_additem(menu, "\\rTRAP + SLAY + 1% DAMAGE", "1");'
+          )
+          replace_once(
+              '    client_print(admin, print_chat, "[GUARD] #%d %s trapped; outgoing damage is capped at 1.", get_user_userid(target), name);',
+              '    client_print(admin, print_chat, "[GUARD] #%d %s trapped; outgoing damage reduced to 1%%.", get_user_userid(target), name);'
+          )
+
+          path.write_text(text, encoding="utf-8", newline="\n")
+
+          cfg = Path("configs/plugins/hldm_runtime_guard.cfg")
+          text = cfg.read_text(encoding="utf-8")
+          text = text.replace('// HLDM Runtime Guard 1.0.0', '// HLDM Runtime Guard 1.1.0', 1)
+          old = '// Final raw damage dealt by a marked client per hit.\nhldm_guard_damage_cap "1.0"'
+          new = '// Exact outgoing damage multiplier for a marked client.\n// 0.01 means one percent of normal damage.\nhldm_guard_damage_scale "0.01"'
+          if old not in text:
+              raise SystemExit("missing config damage anchor")
+          text = text.replace(old, new, 1)
+          cfg.write_text(text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit Runtime Guard v1.1
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_runtime_guard.sma configs/plugins/hldm_runtime_guard.cfg
+          git commit -m "Add exact 1 percent damage and quick punishment hotkeys"
+          git push origin HEAD:main
