@@ -655,9 +655,9 @@ stock ShowDebugHud(viewer)
     new output[512], length;
     length += formatex(output[length], charsmax(output) - length, "GUARD XRAY | /ac menu^n");
 
-    new Float:viewAngles[3], Float:forward[3], Float:right[3], Float:up[3];
+    new Float:viewAngles[3], Float:forwardVector[3], Float:rightVector[3], Float:upVector[3];
     pev(viewer, pev_v_angle, viewAngles);
-    engfunc(EngFunc_AngleVectors, viewAngles, forward, right, up);
+    engfunc(EngFunc_AngleVectors, viewAngles, forwardVector, rightVector, upVector);
 
     new Float:viewerOrigin[3];
     pev(viewer, pev_origin, viewerOrigin);
@@ -677,8 +677,8 @@ stock ShowDebugHud(viewer)
         new distance = floatround(floatsqroot(VectorDistanceSquared(viewerOrigin, targetOrigin)));
         NormalizeVector(direction);
 
-        new Float:frontDot = DotProduct(forward, direction);
-        new Float:sideDot = DotProduct(right, direction);
+        new Float:frontDot = DotProduct(forwardVector, direction);
+        new Float:sideDot = DotProduct(rightVector, direction);
         new bearing[8];
         if (frontDot < -0.25)
         {
