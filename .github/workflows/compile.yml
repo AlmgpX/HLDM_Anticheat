@@ -13,7 +13,7 @@ env:
   AMXX_BUILD: "5479"
   AMXX_TAG: "1.10.0.5479"
   AMXX_ARCHIVE: "amxmodx-1.10.0-git5479-base-windows.zip"
-  PLUGIN_VERSION: "0.2.0"
+  PLUGIN_VERSION: "1.0.0"
 
 jobs:
   compile:
@@ -22,11 +22,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Repository contract
+      - name: Repository contract and PowerShell parse
         shell: pwsh
         run: |
           python -m py_compile tools/check_contract.py
           python tools/check_contract.py
+
+          $parseErrors = @()
+          Get-ChildItem -Recurse -Filter *.ps1 | ForEach-Object {
+              $tokens = $null
+              $errors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null
+              if ($errors.Count -gt 0) {
+                  $parseErrors += $errors
+              }
+          }
+
+          if ($parseErrors.Count -gt 0) {
+              $parseErrors | Format-List | Out-String | Write-Error
+              throw "PowerShell parse errors found."
+          }
 
       - name: Download official AMX Mod X compiler
         shell: pwsh
@@ -55,33 +70,47 @@ jobs:
               throw "Compiler not found: $compiler"
           }
 
-      - name: Compile plugin
+      - name: Compile all plugins
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $scripting = Join-Path $PWD ".amxx\addons\amxmodx\scripting"
           $compiler = Join-Path $scripting "amxxpc.exe"
-          $source = Join-Path $scripting "hldm_trap.sma"
-          $output = Join-Path $scripting "hldm_trap.amxx"
           $log = Join-Path $PWD "build-compiler.log"
 
-          Copy-Item "src\hldm_trap.sma" $source -Force
-          Push-Location $scripting
-          try {
-              & $compiler "hldm_trap.sma" "-ohldm_trap.amxx" 2>&1 | Tee-Object -FilePath $log
-              if ($LASTEXITCODE -ne 0) {
-                  throw "AMXX compiler returned exit code $LASTEXITCODE"
-              }
-          } finally {
-              Pop-Location
-          }
-
-          if (-not (Test-Path $output -PathType Leaf) -or (Get-Item $output).Length -le 0) {
-              throw "Compiler did not produce a non-empty plugin: $output"
-          }
-
+          Remove-Item $log -Force -ErrorAction SilentlyContinue
           New-Item -ItemType Directory -Path build -Force | Out-Null
-          Copy-Item $output "build\hldm_trap.amxx" -Force
+
+          $sources = Get-ChildItem "src\*.sma" | Sort-Object Name
+          if ($sources.Count -lt 2) {
+              throw "Expected at least trap and detector sources."
+          }
+
+          foreach ($sourceFile in $sources) {
+              $name = $sourceFile.BaseName
+              $temporarySource = Join-Path $scripting $sourceFile.Name
+              $temporaryOutput = Join-Path $scripting "$name.amxx"
+
+              Copy-Item $sourceFile.FullName $temporarySource -Force
+              Remove-Item $temporaryOutput -Force -ErrorAction SilentlyContinue
+
+              Push-Location $scripting
+              try {
+                  "===== $($sourceFile.Name) =====" | Tee-Object -FilePath $log -Append
+                  & $compiler $sourceFile.Name "-o$name.amxx" 2>&1 | Tee-Object -FilePath $log -Append
+                  if ($LASTEXITCODE -ne 0) {
+                      throw "AMXX compiler returned exit code $LASTEXITCODE for $($sourceFile.Name)"
+                  }
+              } finally {
+                  Pop-Location
+              }
+
+              if (-not (Test-Path $temporaryOutput -PathType Leaf) -or (Get-Item $temporaryOutput).Length -le 0) {
+                  throw "Compiler did not produce a non-empty plugin: $temporaryOutput"
+              }
+
+              Copy-Item $temporaryOutput "build\$name.amxx" -Force
+          }
 
       - name: Build install package
         shell: pwsh
@@ -92,12 +121,15 @@ jobs:
 
           New-Item -ItemType Directory -Path "$package\addons\amxmodx\plugins" -Force | Out-Null
           New-Item -ItemType Directory -Path "$package\addons\amxmodx\configs\plugins" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$package\deploy" -Force | Out-Null
           New-Item -ItemType Directory -Path "$package\docs" -Force | Out-Null
 
-          Copy-Item "build\hldm_trap.amxx" "$package\addons\amxmodx\plugins\"
-          Copy-Item "configs\plugins\hldm_trap.cfg" "$package\addons\amxmodx\configs\plugins\"
+          Copy-Item "build\*.amxx" "$package\addons\amxmodx\plugins\"
+          Copy-Item "configs\plugins\*.cfg" "$package\addons\amxmodx\configs\plugins\"
+          Copy-Item "deploy\*.ps1" "$package\deploy\"
+          Copy-Item "deploy\*.cfg" "$package\deploy\" -ErrorAction SilentlyContinue
           Copy-Item README.md, CHANGELOG.md, LICENSE $package
-          Copy-Item "docs\INSTALL_RU.md", "docs\TEST_PLAN.md" "$package\docs\"
+          Copy-Item "docs\*.md" "$package\docs\"
 
           $zip = "build\hldm-anticheat-$env:PLUGIN_VERSION.zip"
           Remove-Item $zip -Force -ErrorAction SilentlyContinue
@@ -107,12 +139,12 @@ jobs:
               throw "Install ZIP was not created."
           }
 
-      - name: Upload plugin and package
+      - name: Upload plugins and package
         uses: actions/upload-artifact@v4
         with:
           name: hldm-anticheat-${{ env.PLUGIN_VERSION }}-amxx-${{ env.AMXX_BUILD }}
           path: |
-            build/hldm_trap.amxx
+            build/*.amxx
             build/hldm-anticheat-${{ env.PLUGIN_VERSION }}.zip
             build-compiler.log
           if-no-files-found: error
