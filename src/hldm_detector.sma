@@ -451,7 +451,7 @@ stock MaybeApplyTrap(id, const reason[])
         return;
     }
 
-    new minimumCategories = ClampInt(get_pcvar_num(g_pcvarMinimumCategories), 1, Signal_Count);
+    new minimumCategories = ClampInt(get_pcvar_num(g_pcvarMinimumCategories), 1, _:Signal_Count);
     new minimumEvents = ClampInt(get_pcvar_num(g_pcvarMinimumEvents), 1, 100);
 
     if (CountCategories(g_categoryMask[id]) < minimumCategories || CountEvents(id) < minimumEvents)
@@ -512,9 +512,9 @@ stock UpdateVisibleTarget(id, const Float:angles[3], Float:now)
 stock FindBestVisibleTarget(id, const Float:angles[3])
 {
     new Float:eye[3];
-    new Float:forward[3], Float:right[3], Float:up[3];
+    new Float:forwardVector[3], Float:rightVector[3], Float:upVector[3];
     GetEyePosition(id, eye);
-    engfunc(EngFunc_AngleVectors, angles, forward, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, rightVector, upVector);
 
     new Float:minimumDot = ClampFloat(get_pcvar_float(g_pcvarVisibleDot), 0.50, 0.9999);
     new bestTarget = 0;
@@ -539,7 +539,7 @@ stock FindBestVisibleTarget(id, const Float:angles[3])
             continue;
         }
 
-        new Float:dot = DotProduct(forward, direction);
+        new Float:dot = DotProduct(forwardVector, direction);
         if (dot <= bestDot || !CanSeeTarget(id, target, eye, targetEye))
         {
             continue;
@@ -554,16 +554,16 @@ stock FindBestVisibleTarget(id, const Float:angles[3])
 
 stock TraceAimTarget(id, const Float:angles[3])
 {
-    new Float:eye[3], Float:forward[3], Float:right[3], Float:up[3], Float:end[3];
+    new Float:eye[3], Float:forwardVector[3], Float:rightVector[3], Float:upVector[3], Float:traceEnd[3];
     GetEyePosition(id, eye);
-    engfunc(EngFunc_AngleVectors, angles, forward, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, rightVector, upVector);
 
-    end[0] = eye[0] + forward[0] * 8192.0;
-    end[1] = eye[1] + forward[1] * 8192.0;
-    end[2] = eye[2] + forward[2] * 8192.0;
+    traceEnd[0] = eye[0] + forwardVector[0] * 8192.0;
+    traceEnd[1] = eye[1] + forwardVector[1] * 8192.0;
+    traceEnd[2] = eye[2] + forwardVector[2] * 8192.0;
 
     new trace = create_tr2();
-    engfunc(EngFunc_TraceLine, eye, end, DONT_IGNORE_MONSTERS, id, trace);
+    engfunc(EngFunc_TraceLine, eye, traceEnd, DONT_IGNORE_MONSTERS, id, trace);
     new hit = get_tr2(trace, TR_pHit);
     free_tr2(trace);
 
@@ -575,10 +575,10 @@ stock TraceAimTarget(id, const Float:angles[3])
     return 0;
 }
 
-stock bool:CanSeeTarget(id, target, const Float:start[3], const Float:end[3])
+stock bool:CanSeeTarget(id, target, const Float:traceStart[3], const Float:traceEnd[3])
 {
     new trace = create_tr2();
-    engfunc(EngFunc_TraceLine, start, end, DONT_IGNORE_MONSTERS, id, trace);
+    engfunc(EngFunc_TraceLine, traceStart, traceEnd, DONT_IGNORE_MONSTERS, id, trace);
 
     new hit = get_tr2(trace, TR_pHit);
     new Float:fraction;
