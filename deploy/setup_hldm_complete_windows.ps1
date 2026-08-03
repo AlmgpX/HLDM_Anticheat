@@ -35,6 +35,25 @@ foreach ($required in @($setupScript, $adminScript)) {
     }
 }
 
+# Older 1.1 packages rejected arrays containing blank lines in plugins.ini/server.cfg.
+# Patch the helper in place before invoking it so rerunning the installer is idempotent.
+$setupText = Get-Content $setupScript -Raw
+if ($setupText -notmatch '\[AllowEmptyString\(\)\]') {
+    $pattern = '(?m)(\[Parameter\(Mandatory = \$true\)\]\r?\n\s*)(\[string\[\]\]\$Lines)'
+    $replacement = '${1}[AllowEmptyString()]' + [Environment]::NewLine + '        [AllowEmptyCollection()]' + [Environment]::NewLine + '        ${2}'
+    $patchedText = [regex]::Replace($setupText, $pattern, $replacement, 1)
+
+    if ($patchedText -eq $setupText) {
+        throw "Could not patch Write-Utf8NoBom Lines parameter in $setupScript"
+    }
+
+    [System.IO.File]::WriteAllText(
+        $setupScript,
+        $patchedText,
+        (New-Object System.Text.UTF8Encoding($false))
+    )
+}
+
 $setupParameters = @{
     HalfLifeRoot = $HalfLifeRoot
     RconPassword = $RconPassword
@@ -60,17 +79,33 @@ if (-not (Test-Path $serverOverlay -PathType Leaf)) {
     throw "Generated server overlay was not found: $serverOverlay"
 }
 
-$overlayLines = @(Get-Content $serverOverlay)
+$overlayLines = @(
+    Get-Content $serverOverlay |
+        Where-Object {
+            $_ -notmatch '^\s*hostname\s+' -and
+            $_ -notmatch '^\s*sv_password\s+' -and
+            $_ -notmatch '^\s*sv_lan\s+'
+        }
+)
+
+$overlayLines += "hostname `"$($Hostname.Replace('"', "'"))`""
+$overlayLines += 'sv_password ""'
+$overlayLines += 'sv_lan "0"'
+
 if (-not ($overlayLines -match '^\s*mp_consistency\s+"?1"?\s*$')) {
-    $overlayLines += "mp_consistency `"1`""
-    $encoding = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllLines($serverOverlay, $overlayLines, $encoding)
+    $overlayLines += 'mp_consistency "1"'
 }
+
+$encoding = New-Object System.Text.UTF8Encoding($false)
+[System.IO.File]::WriteAllLines($serverOverlay, $overlayLines, $encoding)
 
 & $adminScript -HalfLifeRoot $HalfLifeRoot -AdminSteamId $AdminSteamId
 
 Write-Host ""
 Write-Host "Complete HLDM Anticheat setup finished."
+Write-Host "Server name: $Hostname"
+Write-Host "Public listing: sv_lan 0"
+Write-Host "Player password: disabled"
 Write-Host "Standard-model guard and mp_consistency are enabled."
 Write-Host "Client keys: F6 ESP, F7 mode, F8 inspect, F9 trap, F10 untrap."
 
