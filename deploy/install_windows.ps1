@@ -1,35 +1,52 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string]$HalfLifeRoot
+    [string]$HalfLifeRoot,
+
+    [string]$RconPassword = "CHANGE_ME_NOW",
+
+    [string]$Hostname = "HLDM Anticheat Trap",
+
+    [ValidateRange(1, 64)]
+    [int]$MaxPlayers = 16,
+
+    [ValidateRange(1024, 65535)]
+    [int]$Port = 27015,
+
+    [string]$StartMap = "crossfire",
+
+    [switch]$ForceRuntimeInstall,
+
+    [switch]$OpenFirewall,
+
+    [switch]$StartServer
 )
 
 $ErrorActionPreference = "Stop"
-$repoRoot = Split-Path -Parent $PSScriptRoot
-$valveRoot = Join-Path $HalfLifeRoot "valve"
-$amxxRoot = Join-Path $valveRoot "addons\amxmodx"
-$pluginSource = Join-Path $repoRoot "build\hldm_trap.amxx"
-$configSource = Join-Path $repoRoot "configs\hldm_trap.cfg"
-$pluginTarget = Join-Path $amxxRoot "plugins\hldm_trap.amxx"
-$configTarget = Join-Path $amxxRoot "configs\hldm_trap.cfg"
-$pluginsIni = Join-Path $amxxRoot "configs\plugins.ini"
 
-foreach ($required in @($amxxRoot, $pluginSource, $configSource, $pluginsIni)) {
-    if (-not (Test-Path $required)) {
-        throw "Required path does not exist: $required"
-    }
+$setup = Join-Path $PSScriptRoot "setup_hldm_server_windows.ps1"
+if (-not (Test-Path $setup -PathType Leaf)) {
+    throw "Setup script was not found: $setup"
 }
 
-$backup = "$pluginsIni.bak_$(Get-Date -Format yyyyMMdd_HHmmss)"
-Copy-Item $pluginsIni $backup -Force
-Copy-Item $pluginSource $pluginTarget -Force
-Copy-Item $configSource $configTarget -Force
-
-$lines = Get-Content $pluginsIni
-if (-not ($lines -match '^\s*hldm_trap\.amxx\s*$')) {
-    Add-Content -Path $pluginsIni -Value "`nhldm_trap.amxx"
+$arguments = @{
+    HalfLifeRoot = $HalfLifeRoot
+    RconPassword = $RconPassword
+    Hostname = $Hostname
+    MaxPlayers = $MaxPlayers
+    Port = $Port
+    StartMap = $StartMap
 }
 
-Write-Host "Installed plugin: $pluginTarget"
-Write-Host "Installed config: $configTarget"
-Write-Host "Backup: $backup"
-Write-Host "Restart the server or change the map."
+if ($ForceRuntimeInstall) {
+    $arguments.ForceRuntimeInstall = $true
+}
+
+if ($OpenFirewall) {
+    $arguments.OpenFirewall = $true
+}
+
+if ($StartServer) {
+    $arguments.StartServer = $true
+}
+
+& $setup @arguments
