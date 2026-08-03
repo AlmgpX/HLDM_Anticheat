@@ -6,7 +6,7 @@ param(
 
     [string]$RconPassword = "CHANGE_ME_NOW",
 
-    [string]$Hostname = "HLDM Anticheat Trap",
+    [string]$Hostname = "AlexMerqury_DM_Server",
 
     [ValidateRange(1, 64)]
     [int]$MaxPlayers = 16,
