@@ -1,0 +1,53 @@
+name: Repair admin binds
+
+on:
+  push:
+    paths:
+      - ".github/workflows/repair-admin-binds.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Update local admin binds
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("deploy/install_admin_tools_windows.ps1")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              '    "// HLDM Anticheat local admin binds"\n    "bind `"F6`" `"amx_ac_esp`""',
+              '    "// HLDM Anticheat local admin binds"\n    "bind `"F5`" `"amx_ac_noclip`""\n    "bind `"F6`" `"amx_ac_esp`""',
+              1,
+          )
+          text = text.replace(
+              '    "bind `"F8`" `"amx_ac_aim status`""',
+              '    "bind `"F8`" `"amx_ac_menu`""',
+              1,
+          )
+          text = text.replace(
+              '    "echo HLDM admin binds loaded: F6 ESP, F7 mode, F8 inspect, F9 trap, F10 untrap"',
+              '    "echo HLDM admin binds loaded: F5 noclip, F6 ESP, F7 mode, F8 player menu, F9 trap, F10 untrap"',
+              1,
+          )
+          path.write_text(text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add deploy/install_admin_tools_windows.ps1
+          git commit -m "Update admin binds for menu and noclip"
+          git push origin HEAD:main
