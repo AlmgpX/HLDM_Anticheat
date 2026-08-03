@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   AMXX_BUILD: "5479"
@@ -21,6 +21,32 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+
+      - name: Normalize Pawn quote escapes
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          @'
+          from pathlib import Path
+
+          path = Path("src/hldm_trap.sma")
+          text = path.read_text(encoding="utf-8")
+          bad = "^" + chr(92) + '"'
+          fixed = text.replace(bad, '^"')
+          if fixed != text:
+              path.write_text(fixed, encoding="utf-8", newline="\n")
+          '@ | python -
+
+          if (-not (git diff --quiet -- src/hldm_trap.sma)) {
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git add src/hldm_trap.sma
+              git commit -m "Fix Pawn quote escapes"
+              git push origin "HEAD:$env:GITHUB_HEAD_REF"
+          }
 
       - name: Repository contract
         shell: pwsh
