@@ -1,0 +1,259 @@
+name: Runtime v1.3 patcher
+
+on:
+  push:
+    paths:
+      - "docs/RUNTIME_V13_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Patch runtime
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          admin = Path("src/hldm_admin_tools.sma")
+          text = admin.read_text(encoding="utf-8")
+          text = text.replace('#define PLUGIN_VERSION "1.2.0"', '#define PLUGIN_VERSION "1.3.0"', 1)
+
+          anchor = '    register_concmd("amx_ac_binds", "CmdBinds", ADMIN_RCON, "- print recommended local binds");\n'
+          text = text.replace(anchor, anchor + '    register_clcmd("say /ac", "CmdChatMenu");\n    register_clcmd("say_team /ac", "CmdChatMenu");\n', 1)
+
+          anchor = '    AutoExecConfig(true, "hldm_admin_tools");\n    set_task(0.25, "TaskRender", TASK_RENDER, _, _, "b");\n'
+          text = text.replace(anchor, '    AutoExecConfig(true, "hldm_admin_tools");\n    register_forward(FM_PlayerPreThink, "OnPlayerPreThink", false);\n    set_task(0.25, "TaskRender", TASK_RENDER, _, _, "b");\n', 1)
+
+          old = '''    g_adminNoclip[id] = enable;
+    set_pev(id, pev_movetype, enable ? MOVETYPE_NOCLIP : MOVETYPE_WALK);
+    client_print(id, print_chat, "[HLDM Admin] noclip %s.", enable ? "ON" : "OFF");
+    return PLUGIN_HANDLED;
+}
+
+public CmdPlayerMenu'''
+          new = '''    g_adminNoclip[id] = enable;
+    ApplyMovementMode(id);
+    client_print(id, print_chat, "[HLDM Admin] noclip %s.", enable ? "ON" : "OFF");
+    return PLUGIN_HANDLED;
+}
+
+public OnPlayerPreThink(id)
+{
+    if (id < 1 || id > MaxClients || !g_adminNoclip[id] || !is_user_alive(id) || !is_user_admin(id))
+    {
+        return FMRES_IGNORED;
+    }
+
+    set_pev(id, pev_movetype, MOVETYPE_NOCLIP);
+    set_pev(id, pev_solid, SOLID_NOT);
+    set_pev(id, pev_gravity, 0.0);
+    return FMRES_HANDLED;
+}
+
+public CmdChatMenu(id)
+{
+    if (!RequirePlayerAdmin(id))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    ShowPlayerMenu(id);
+    return PLUGIN_HANDLED;
+}
+
+public CmdPlayerMenu'''
+          if old not in text:
+              raise SystemExit("noclip anchor missing")
+          text = text.replace(old, new, 1)
+
+          anchor = '            DrawTargetOverlay(viewer, target, target == aimedTarget);\n'
+          text = text.replace(anchor, anchor + '            DrawProjectedXrayMarker(viewer, target, target == aimedTarget);\n', 1)
+
+          anchor = '''stock DrawPlayerHull(viewer, target, red, green, blue)
+{'''
+          insert = '''stock DrawProjectedXrayMarker(viewer, target, bool:isAimed)
+{
+    new Float:eye[3], Float:viewOffset[3], Float:targetCenter[3], Float:direction[3];
+    pev(viewer, pev_origin, eye);
+    pev(viewer, pev_view_ofs, viewOffset);
+    eye[0] += viewOffset[0];
+    eye[1] += viewOffset[1];
+    eye[2] += viewOffset[2];
+
+    pev(target, pev_origin, targetCenter);
+    targetCenter[2] += 36.0;
+    direction[0] = targetCenter[0] - eye[0];
+    direction[1] = targetCenter[1] - eye[1];
+    direction[2] = targetCenter[2] - eye[2];
+    if (!NormalizeVector(direction))
+    {
+        return;
+    }
+
+    new Float:center[3], Float:minimum[3], Float:maximum[3];
+    center[0] = eye[0] + direction[0] * 18.0;
+    center[1] = eye[1] + direction[1] * 18.0;
+    center[2] = eye[2] + direction[2] * 18.0;
+    minimum[0] = center[0] - 0.8;
+    minimum[1] = center[1] - 0.8;
+    minimum[2] = center[2] - 0.8;
+    maximum[0] = center[0] + 0.8;
+    maximum[1] = center[1] + 0.8;
+    maximum[2] = center[2] + 0.8;
+    DrawBox(viewer, minimum, maximum, isAimed ? 255 : 255, isAimed ? 40 : 220, 40);
+}
+
+stock bool:NormalizeVector(Float:vector[3])
+{
+    new Float:length = floatsqroot(vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]);
+    if (length <= 0.0001)
+    {
+        return false;
+    }
+
+    vector[0] /= length;
+    vector[1] /= length;
+    vector[2] /= length;
+    return true;
+}
+
+stock DrawPlayerHull(viewer, target, red, green, blue)
+{'''
+          if anchor not in text:
+              raise SystemExit("xray anchor missing")
+          text = text.replace(anchor, insert, 1)
+
+          old = '''stock RestoreMovement(id)
+{
+    if (id >= 1 && id <= MaxClients && is_user_connected(id) && g_adminNoclip[id])
+    {
+        set_pev(id, pev_movetype, MOVETYPE_WALK);
+    }
+}
+'''
+          new = '''stock ApplyMovementMode(id)
+{
+    if (!is_user_alive(id))
+    {
+        return;
+    }
+
+    if (g_adminNoclip[id])
+    {
+        set_pev(id, pev_movetype, MOVETYPE_NOCLIP);
+        set_pev(id, pev_solid, SOLID_NOT);
+        set_pev(id, pev_gravity, 0.0);
+    }
+    else
+    {
+        set_pev(id, pev_movetype, MOVETYPE_WALK);
+        set_pev(id, pev_solid, SOLID_SLIDEBOX);
+        set_pev(id, pev_gravity, 1.0);
+    }
+}
+
+stock RestoreMovement(id)
+{
+    if (id >= 1 && id <= MaxClients && is_user_connected(id))
+    {
+        g_adminNoclip[id] = false;
+        ApplyMovementMode(id);
+    }
+}
+'''
+          if old not in text:
+              raise SystemExit("restore anchor missing")
+          text = text.replace(old, new, 1)
+          admin.write_text(text, encoding="utf-8", newline="\n")
+
+          trap = Path("src/hldm_trap.sma")
+          text = trap.read_text(encoding="utf-8")
+          text = text.replace('#define PLUGIN_VERSION "0.2.0"', '#define PLUGIN_VERSION "0.3.1"', 1)
+          text = text.replace('new g_pcvarOutgoingScale;\n', 'new g_pcvarOutgoingScale;\nnew g_pcvarOutgoingCap;\nnew g_pcvarSlayOnEnable;\n', 1)
+          text = text.replace('    g_pcvarOutgoingScale = register_cvar("hldm_trap_outgoing_scale", "0.08");\n', '    g_pcvarOutgoingScale = register_cvar("hldm_trap_outgoing_scale", "0.0");\n    g_pcvarOutgoingCap = register_cvar("hldm_trap_outgoing_cap", "1.0");\n    g_pcvarSlayOnEnable = register_cvar("hldm_trap_slay_on_enable", "1");\n', 1)
+
+          start = text.index('public OnPlayerTakeDamage(')
+          end = text.index('\npublic OnCmdStart(', start)
+          text = text[:start] + '''public OnPlayerTakeDamage(victim, inflictor, attacker, Float:damage, damageBits)
+{
+    if (!get_pcvar_num(g_pcvarEnabled) || damage <= 0.0)
+    {
+        return HAM_IGNORED;
+    }
+
+    new Float:adjustedDamage = damage;
+    new bool:changed = false;
+
+    if (IsPlayerIndex(victim) && g_trapped[victim])
+    {
+        new severity = GetSeverity(victim);
+        if (severity > 0)
+        {
+            new Float:maximumScale = ClampFloat(get_pcvar_float(g_pcvarIncomingScale), 1.0, 10.0);
+            adjustedDamage *= 1.0 + ((maximumScale - 1.0) * float(severity) / 100.0);
+            changed = true;
+        }
+    }
+
+    if (IsPlayerIndex(attacker) && attacker != victim && g_trapped[attacker])
+    {
+        new Float:damageCap = ClampFloat(get_pcvar_float(g_pcvarOutgoingCap), 0.1, 10.0);
+        adjustedDamage = damageCap;
+        changed = true;
+    }
+
+    if (!changed || floatabs(adjustedDamage - damage) < 0.001)
+    {
+        return HAM_IGNORED;
+    }
+
+    SetHamParamFloat(4, adjustedDamage);
+    return HAM_HANDLED;
+}
+''' + text[end:]
+
+          old = '''    if (!g_trapped[target])
+    {
+        g_trapped[target] = true;
+        SetPhase(target, TrapPhase_Soft);
+    }
+'''
+          new = '''    new bool:wasTrapped = g_trapped[target];
+    if (!wasTrapped)
+    {
+        g_trapped[target] = true;
+        SetPhase(target, TrapPhase_Hard);
+        if (get_pcvar_num(g_pcvarSlayOnEnable) && is_user_alive(target))
+        {
+            user_kill(target, 1);
+        }
+    }
+'''
+          if old not in text:
+              raise SystemExit("enable anchor missing")
+          text = text.replace(old, new, 1)
+          trap.write_text(text, encoding="utf-8", newline="\n")
+
+          cfg = Path("configs/plugins/hldm_trap.cfg")
+          text = cfg.read_text(encoding="utf-8")
+          text = text.replace('// HLDM Trap 0.3.0 aggressive profile', '// HLDM Trap 0.3.1 hard-cap profile', 1)
+          text = text.replace('hldm_trap_outgoing_scale "0.0"\n', 'hldm_trap_outgoing_scale "0.0"\nhldm_trap_outgoing_cap "1.0"\nhldm_trap_slay_on_enable "1"\n', 1)
+          cfg.write_text(text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_admin_tools.sma src/hldm_trap.sma configs/plugins/hldm_trap.cfg
+          git commit -m "Fix noclip, projected xray and one-damage cap"
+          git push origin HEAD:main
