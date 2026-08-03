@@ -1,106 +1,198 @@
-# Установка на Windows
+# Установка HLDM Anticheat на Windows
 
-## 1. Серверная цепочка
-
-Плагин не запускается сам по себе. Нужна цепочка:
+## Готовая цепочка
 
 ```text
-HLDS/ReHLDS -> Metamod -> AMX Mod X -> hldm_trap.amxx
+HLDS/ReHLDS -> Metamod-P -> AMX Mod X -> hldm_trap.amxx -> hldm_detector.amxx
 ```
 
-В серверной консоли проверь:
+Порядок двух плагинов важен: ловушка загружается раньше детектора, чтобы автоматическая команда `amx_trap` уже была зарегистрирована.
+
+## Вариант A: установленная Steam-версия Half-Life
+
+Распакуй release/CI-пакет и открой PowerShell в его корне:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\deploy\setup_hldm_server_windows.ps1 `
+  -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life" `
+  -RconPassword "СЛОЖНЫЙ_ПАРОЛЬ" `
+  -Hostname "HLDM Anticheat Trap" `
+  -Port 27015 `
+  -MaxPlayers 16 `
+  -OpenFirewall
+```
+
+Скрипт:
+
+- проверяет наличие `hlds.exe` и `valve`;
+- при необходимости скачивает Metamod-P и AMX Mod X 1.10.0.5479;
+- меняет `liblist.gam` на загрузку Metamod и создаёт резервную копию;
+- добавляет AMX Mod X в `addons/metamod/plugins.ini`;
+- устанавливает оба `.amxx` и оба конфига;
+- добавляет плагины в `plugins.ini` в правильном порядке;
+- создаёт `hldm_anticheat_server.cfg`;
+- создаёт `run_hldm_anticheat_server.bat`;
+- опционально открывает UDP-порт в Windows Firewall.
+
+Запуск:
+
+```text
+Half-Life\run_hldm_anticheat_server.bat
+```
+
+## Вариант B: чистый отдельный HLDS через SteamCMD
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\deploy\install_fresh_hlds_windows.ps1 `
+  -ServerRoot "E:\HLDM_Server" `
+  -RconPassword "СЛОЖНЫЙ_ПАРОЛЬ" `
+  -Hostname "HLDM Anticheat Trap" `
+  -Port 27015 `
+  -MaxPlayers 16 `
+  -OpenFirewall `
+  -StartServer
+```
+
+Установщик скачивает SteamCMD, устанавливает/обновляет HLDS AppID 90 с модом `valve`, затем вызывает основной setup-скрипт.
+
+## Вариант C: стандартная GoldSrc-папка вне Steam
+
+Основной setup-скрипт не требует, чтобы путь находился внутри `SteamLibrary`. Требуется обычная структура:
+
+```text
+<HalfLifeRoot>\hlds.exe
+<HalfLifeRoot>\valve\
+```
+
+Запуск тот же:
+
+```powershell
+.\deploy\setup_hldm_server_windows.ps1 `
+  -HalfLifeRoot "D:\Games\Half-Life" `
+  -RconPassword "СЛОЖНЫЙ_ПАРОЛЬ"
+```
+
+Проект не содержит кряков, эмуляторов SteamID и инструкций по обходу Steam. Для LAN-ID детектор и ловушка работают в текущей сессии, но nVault не сохраняет цель навсегда.
+
+## Проверка после запуска
+
+В консоли сервера:
 
 ```text
 meta list
 amxx version
 amxx modules
-```
-
-Нужны модули `Fakemeta`, `Ham Sandwich` и `nVault`. Они входят в базовый AMX Mod X и обычно загружаются автоматически по зависимостям плагина.
-
-## 2. Компиляция вручную
-
-Положи `src/hldm_trap.sma` в:
-
-```text
-Half-Life\valve\addons\amxmodx\scripting\
-```
-
-Запусти `amxxpc.exe hldm_trap.sma`. Готовый `hldm_trap.amxx` появится рядом с исходником.
-
-Сборка из репозитория:
-
-```powershell
-.\tools\build_windows.ps1 -AmxxRoot "E:\SteamLibrary\steamapps\common\Half-Life\valve"
-```
-
-Результат:
-
-```text
-build\hldm_trap.amxx
-```
-
-## 3. Установка
-
-```powershell
-.\deploy\install_windows.ps1 -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life"
-```
-
-Скрипт:
-
-- проверяет AMXX и собранный `.amxx`;
-- копирует плагин;
-- копирует AutoExecConfig в `addons/amxmodx/configs/plugins/hldm_trap.cfg`;
-- делает резервную копию `plugins.ini`;
-- добавляет `hldm_trap.amxx` без дубликатов.
-
-## 4. Проверка после смены карты
-
-```text
 amxx plugins
-amxx modules
-amxx cvars
 ```
 
-В `amxx plugins` плагин должен иметь статус `running`, а не `bad load`.
+Нужны модули:
 
-Проверка команд:
+```text
+Fakemeta
+Ham Sandwich
+nVault
+```
+
+Ожидаемые плагины:
+
+```text
+hldm_trap.amxx      running
+hldm_detector.amxx  running
+```
+
+Проверка интеграции:
 
 ```text
 status
+amx_ac_testtrap #USERID
 amx_trap_list
-amx_trap #USERID
 amx_untrap #USERID
 ```
 
-## 5. Проверка пути конфига
-
-В серверной консоли:
+Проверка детектора:
 
 ```text
-hldm_trap_outgoing_scale
-hldm_trap_protect_admins
-hldm_trap_auto_trap_custom_models
+amx_ac_status
+amx_ac_mode 1
+amx_ac_mode 2
 ```
 
-Значения должны совпадать с:
+## Конфиги
 
 ```text
 valve\addons\amxmodx\configs\plugins\hldm_trap.cfg
+valve\addons\amxmodx\configs\plugins\hldm_detector.cfg
 ```
 
-Старый путь `configs\hldm_trap.cfg` не используется `AutoExecConfig`.
+Проверка загрузки cvar:
 
-## 6. Откат
+```text
+hldm_trap_outgoing_scale
+hldm_trap_auto_trap_custom_models
+hldm_ac_mode
+hldm_ac_auto_threshold
+hldm_ac_minimum_categories
+```
+
+## Администратор AMX Mod X
+
+Команды требуют флаг `l` (`ADMIN_RCON`). Добавь свой SteamID в:
+
+```text
+valve\addons\amxmodx\configs\users.ini
+```
+
+Пример:
+
+```text
+"STEAM_0:1:12345678" "" "abcdefghijklmnopqrstu" "ce"
+```
+
+После изменения выполни `amx_reloadadmins` или перезапусти сервер.
+
+## Ручная компиляция
+
+Положи оба исходника в:
+
+```text
+valve\addons\amxmodx\scripting\
+```
+
+Затем:
 
 ```powershell
-.\deploy\uninstall_windows.ps1 -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life"
+amxxpc.exe hldm_trap.sma
+amxxpc.exe hldm_detector.sma
 ```
 
-Удалить также nVault со списком целей:
+Готовые файлы:
+
+```text
+hldm_trap.amxx
+hldm_detector.amxx
+```
+
+CI делает то же официальным AMX Mod X Compiler 1.10.0.5479.
+
+## Откат
+
+Удалить оба плагина и конфиги, оставив Metamod и AMX Mod X:
+
+```powershell
+.\deploy\uninstall_windows.ps1 `
+  -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life"
+```
+
+Удалить также nVault, логи и launcher:
 
 ```powershell
 .\deploy\uninstall_windows.ps1 `
   -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life" `
-  -RemoveVault
+  -RemoveVault `
+  -RemoveLogs `
+  -RemoveLauncher
 ```
+
+Резервные копии `liblist.gam` и `plugins.ini` setup-скрипт не удаляет. Это полезнее, чем уверенность человека, который нажал Enter и внезапно вспомнил о последствиях.
