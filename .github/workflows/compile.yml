@@ -12,72 +12,100 @@ permissions:
 env:
   AMXX_BUILD: "5479"
   AMXX_TAG: "1.10.0.5479"
-  AMXX_ARCHIVE: "amxmodx-1.10.0-git5479-base-linux.tar.gz"
+  AMXX_ARCHIVE: "amxmodx-1.10.0-git5479-base-windows.zip"
   PLUGIN_VERSION: "0.2.0"
 
 jobs:
   compile:
-    runs-on: ubuntu-22.04
+    runs-on: windows-2022
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Repository contract
+        shell: pwsh
         run: |
-          python3 -m py_compile tools/check_contract.py
-          python3 tools/check_contract.py
-
-      - name: Install 32-bit runtime and packaging tools
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y libc6-i386 lib32stdc++6 zip
+          python -m py_compile tools/check_contract.py
+          python tools/check_contract.py
 
       - name: Download official AMX Mod X compiler
-        shell: bash
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          PRIMARY="https://github.com/alliedmodders/amxmodx/releases/download/${AMXX_TAG}/${AMXX_ARCHIVE}"
-          FALLBACK="https://www.amxmodx.org/amxxdrop/1.10/${AMXX_ARCHIVE}"
+          $ErrorActionPreference = "Stop"
+          $primary = "https://github.com/alliedmodders/amxmodx/releases/download/$env:AMXX_TAG/$env:AMXX_ARCHIVE"
+          $fallback = "https://www.amxmodx.org/amxxdrop/1.10/$env:AMXX_ARCHIVE"
+          $archive = Join-Path $env:RUNNER_TEMP "amxx.zip"
 
-          if ! curl --fail --location --retry 3 --output /tmp/amxx.tar.gz "$PRIMARY"; then
-            curl --fail --location --retry 3 --output /tmp/amxx.tar.gz "$FALLBACK"
-          fi
+          try {
+              Invoke-WebRequest -Uri $primary -OutFile $archive
+          } catch {
+              Write-Warning "Primary download failed; using amxmodx.org fallback."
+              Invoke-WebRequest -Uri $fallback -OutFile $archive
+          }
 
-          test -s /tmp/amxx.tar.gz
-          mkdir -p .amxx
-          tar -xzf /tmp/amxx.tar.gz -C .amxx
-          chmod +x .amxx/addons/amxmodx/scripting/amxxpc
+          if (-not (Test-Path $archive -PathType Leaf) -or (Get-Item $archive).Length -le 0) {
+              throw "AMXX archive was not downloaded correctly."
+          }
+
+          New-Item -ItemType Directory -Path .amxx -Force | Out-Null
+          Expand-Archive -Path $archive -DestinationPath .amxx -Force
+
+          $compiler = Join-Path $PWD ".amxx\addons\amxmodx\scripting\amxxpc.exe"
+          if (-not (Test-Path $compiler -PathType Leaf)) {
+              throw "Compiler not found: $compiler"
+          }
 
       - name: Compile plugin
-        shell: bash
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          SCRIPTING="$PWD/.amxx/addons/amxmodx/scripting"
-          cp src/hldm_trap.sma "$SCRIPTING/hldm_trap.sma"
-          cd "$SCRIPTING"
-          ./amxxpc hldm_trap.sma | tee "$GITHUB_WORKSPACE/build-compiler.log"
-          test -s hldm_trap.amxx
-          mkdir -p "$GITHUB_WORKSPACE/build"
-          cp hldm_trap.amxx "$GITHUB_WORKSPACE/build/hldm_trap.amxx"
+          $ErrorActionPreference = "Stop"
+          $scripting = Join-Path $PWD ".amxx\addons\amxmodx\scripting"
+          $compiler = Join-Path $scripting "amxxpc.exe"
+          $source = Join-Path $scripting "hldm_trap.sma"
+          $output = Join-Path $scripting "hldm_trap.amxx"
+          $log = Join-Path $PWD "build-compiler.log"
+
+          Copy-Item "src\hldm_trap.sma" $source -Force
+          Push-Location $scripting
+          try {
+              & $compiler "hldm_trap.sma" "-ohldm_trap.amxx" 2>&1 | Tee-Object -FilePath $log
+              if ($LASTEXITCODE -ne 0) {
+                  throw "AMXX compiler returned exit code $LASTEXITCODE"
+              }
+          } finally {
+              Pop-Location
+          }
+
+          if (-not (Test-Path $output -PathType Leaf) -or (Get-Item $output).Length -le 0) {
+              throw "Compiler did not produce a non-empty plugin: $output"
+          }
+
+          New-Item -ItemType Directory -Path build -Force | Out-Null
+          Copy-Item $output "build\hldm_trap.amxx" -Force
 
       - name: Build install package
-        shell: bash
+        shell: pwsh
         run: |
-          set -euxo pipefail
-          PACKAGE="$PWD/package"
-          mkdir -p "$PACKAGE/addons/amxmodx/plugins"
-          mkdir -p "$PACKAGE/addons/amxmodx/configs/plugins"
-          mkdir -p "$PACKAGE/docs"
+          $ErrorActionPreference = "Stop"
+          $package = Join-Path $PWD "package"
+          Remove-Item $package -Recurse -Force -ErrorAction SilentlyContinue
 
-          cp build/hldm_trap.amxx "$PACKAGE/addons/amxmodx/plugins/"
-          cp configs/plugins/hldm_trap.cfg "$PACKAGE/addons/amxmodx/configs/plugins/"
-          cp README.md CHANGELOG.md LICENSE "$PACKAGE/"
-          cp docs/INSTALL_RU.md docs/TEST_PLAN.md "$PACKAGE/docs/"
+          New-Item -ItemType Directory -Path "$package\addons\amxmodx\plugins" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$package\addons\amxmodx\configs\plugins" -Force | Out-Null
+          New-Item -ItemType Directory -Path "$package\docs" -Force | Out-Null
 
-          cd "$PACKAGE"
-          zip -r "$GITHUB_WORKSPACE/build/hldm-anticheat-${PLUGIN_VERSION}.zip" .
-          test -s "$GITHUB_WORKSPACE/build/hldm-anticheat-${PLUGIN_VERSION}.zip"
+          Copy-Item "build\hldm_trap.amxx" "$package\addons\amxmodx\plugins\"
+          Copy-Item "configs\plugins\hldm_trap.cfg" "$package\addons\amxmodx\configs\plugins\"
+          Copy-Item README.md, CHANGELOG.md, LICENSE $package
+          Copy-Item "docs\INSTALL_RU.md", "docs\TEST_PLAN.md" "$package\docs\"
+
+          $zip = "build\hldm-anticheat-$env:PLUGIN_VERSION.zip"
+          Remove-Item $zip -Force -ErrorAction SilentlyContinue
+          Compress-Archive -Path "$package\*" -DestinationPath $zip -CompressionLevel Optimal
+
+          if (-not (Test-Path $zip -PathType Leaf) -or (Get-Item $zip).Length -le 0) {
+              throw "Install ZIP was not created."
+          }
 
       - name: Upload plugin and package
         uses: actions/upload-artifact@v4
