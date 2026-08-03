@@ -23,6 +23,8 @@ function Write-Utf8NoBom {
         [string]$Path,
 
         [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [AllowEmptyCollection()]
         [string[]]$Lines
     )
 
