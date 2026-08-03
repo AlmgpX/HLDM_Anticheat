@@ -53,14 +53,28 @@ if ($OpenFirewall) {
 }
 
 & $setupScript @setupParameters
+
+$root = [System.IO.Path]::GetFullPath($HalfLifeRoot)
+$serverOverlay = Join-Path $root "valve\hldm_anticheat_server.cfg"
+if (-not (Test-Path $serverOverlay -PathType Leaf)) {
+    throw "Generated server overlay was not found: $serverOverlay"
+}
+
+$overlayLines = @(Get-Content $serverOverlay)
+if (-not ($overlayLines -match '^\s*mp_consistency\s+"?1"?\s*$')) {
+    $overlayLines += "mp_consistency `"1`""
+    $encoding = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllLines($serverOverlay, $overlayLines, $encoding)
+}
+
 & $adminScript -HalfLifeRoot $HalfLifeRoot -AdminSteamId $AdminSteamId
 
 Write-Host ""
 Write-Host "Complete HLDM Anticheat setup finished."
+Write-Host "Standard-model guard and mp_consistency are enabled."
 Write-Host "Client keys: F6 ESP, F7 mode, F8 inspect, F9 trap, F10 untrap."
 
 if ($StartServer) {
-    $root = [System.IO.Path]::GetFullPath($HalfLifeRoot)
     $launcher = Join-Path $root "run_hldm_anticheat_server.bat"
 
     if (-not (Test-Path $launcher -PathType Leaf)) {
