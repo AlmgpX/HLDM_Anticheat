@@ -5,18 +5,23 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Admin Tools"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_PLAYERS 32
 #define TASK_RENDER 24501
+#define TASK_SCANNER 24502
+#define TASK_AUTO_BASE 24600
 
 #define ESP_MODE_HULL  1
 #define ESP_MODE_ZONES 2
 #define ESP_MODE_BOTH  3
 
 new bool:g_adminEsp[MAX_PLAYERS + 1];
+new bool:g_adminScanner[MAX_PLAYERS + 1];
+new bool:g_adminNoclip[MAX_PLAYERS + 1];
 new g_adminMode[MAX_PLAYERS + 1];
+new g_selectedTarget[MAX_PLAYERS + 1];
 new g_beamSprite;
 
 new g_pcvarEnabled;
@@ -27,6 +32,10 @@ new g_pcvarMaxDistance;
 new g_pcvarLineLife;
 new g_pcvarLineWidth;
 new g_pcvarAimHud;
+new g_pcvarAutoEnable;
+new g_pcvarScannerHud;
+new g_pcvarPublicPunish;
+new g_pcvarAllowNoclip;
 
 new const g_standardModels[][] =
 {
@@ -53,20 +62,29 @@ public plugin_init()
 
     register_concmd("amx_ac_esp", "CmdEsp", ADMIN_RCON, "[0|1] - toggle personal admin overlay");
     register_concmd("amx_ac_esp_mode", "CmdEspMode", ADMIN_RCON, "[1|2|3] - hull, body zones, both");
-    register_concmd("amx_ac_aim", "CmdAimAction", ADMIN_RCON, "<status|trap|untrap> - act on aimed player");
+    register_concmd("amx_ac_scan", "CmdScanner", ADMIN_RCON, "[0|1] - toggle all-player debug HUD");
+    register_concmd("amx_ac_menu", "CmdPlayerMenu", ADMIN_RCON, "- open player punishment menu");
+    register_concmd("amx_ac_punish", "CmdPunish", ADMIN_RCON, "<name|#userid|SteamID> - trap and slay immediately");
+    register_concmd("amx_ac_noclip", "CmdNoclip", ADMIN_RCON, "[0|1] - toggle admin debug noclip");
+    register_concmd("amx_ac_aim", "CmdAimAction", ADMIN_RCON, "<status|trap|untrap> - fallback crosshair action");
     register_concmd("amx_ac_binds", "CmdBinds", ADMIN_RCON, "- print recommended local binds");
 
     g_pcvarEnabled = register_cvar("hldm_admin_enabled", "1");
     g_pcvarDefaultMode = register_cvar("hldm_admin_default_mode", "3");
     g_pcvarThroughWalls = register_cvar("hldm_admin_through_walls", "1");
     g_pcvarRequireAlive = register_cvar("hldm_admin_require_alive", "0");
-    g_pcvarMaxDistance = register_cvar("hldm_admin_max_distance", "4096.0");
+    g_pcvarMaxDistance = register_cvar("hldm_admin_max_distance", "8192.0");
     g_pcvarLineLife = register_cvar("hldm_admin_line_life", "4");
-    g_pcvarLineWidth = register_cvar("hldm_admin_line_width", "1");
+    g_pcvarLineWidth = register_cvar("hldm_admin_line_width", "2");
     g_pcvarAimHud = register_cvar("hldm_admin_aim_hud", "1");
+    g_pcvarAutoEnable = register_cvar("hldm_admin_auto_enable", "1");
+    g_pcvarScannerHud = register_cvar("hldm_admin_scanner_hud", "1");
+    g_pcvarPublicPunish = register_cvar("hldm_admin_public_punish", "1");
+    g_pcvarAllowNoclip = register_cvar("hldm_admin_allow_noclip", "1");
 
     AutoExecConfig(true, "hldm_admin_tools");
     set_task(0.25, "TaskRender", TASK_RENDER, _, _, "b");
+    set_task(1.0, "TaskScanner", TASK_SCANNER, _, _, "b");
 }
 
 public client_connect(id)
@@ -77,11 +95,31 @@ public client_connect(id)
 public client_putinserver(id)
 {
     ResetAdmin(id);
+    remove_task(TASK_AUTO_BASE + id);
+    set_task(1.5, "TaskAutoEnable", TASK_AUTO_BASE + id);
 }
 
 public client_disconnected(id, bool:drop, message[], maxlen)
 {
+    remove_task(TASK_AUTO_BASE + id);
+    RestoreMovement(id);
     ResetAdmin(id);
+}
+
+public TaskAutoEnable(taskId)
+{
+    new id = taskId - TASK_AUTO_BASE;
+    if (!is_user_connected(id) || !is_user_admin(id))
+    {
+        return;
+    }
+
+    if (get_pcvar_num(g_pcvarAutoEnable))
+    {
+        g_adminEsp[id] = true;
+        g_adminScanner[id] = bool:(get_pcvar_num(g_pcvarScannerHud) != 0);
+        client_print(id, print_chat, "[HLDM Admin] ESP and scanner enabled. F8 opens player menu.");
+    }
 }
 
 public CmdEsp(id, level, cid)
@@ -103,7 +141,6 @@ public CmdEsp(id, level, cid)
     }
 
     client_print(id, print_chat, "[HLDM Admin] ESP %s. Mode=%d.", g_adminEsp[id] ? "ON" : "OFF", g_adminMode[id]);
-    console_print(id, "[HLDM Admin] ESP %s. Mode=%d.", g_adminEsp[id] ? "ON" : "OFF", g_adminMode[id]);
     return PLUGIN_HANDLED;
 }
 
@@ -130,7 +167,147 @@ public CmdEspMode(id, level, cid)
     }
 
     client_print(id, print_chat, "[HLDM Admin] ESP mode=%d (1 hull, 2 zones, 3 both).", g_adminMode[id]);
-    console_print(id, "[HLDM Admin] ESP mode=%d (1 hull, 2 zones, 3 both).", g_adminMode[id]);
+    return PLUGIN_HANDLED;
+}
+
+public CmdScanner(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1) || !RequirePlayerAdmin(id))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    if (read_argc() >= 2)
+    {
+        new argument[8];
+        read_argv(1, argument, charsmax(argument));
+        g_adminScanner[id] = bool:(str_to_num(argument) != 0);
+    }
+    else
+    {
+        g_adminScanner[id] = !g_adminScanner[id];
+    }
+
+    client_print(id, print_chat, "[HLDM Admin] scanner %s.", g_adminScanner[id] ? "ON" : "OFF");
+    return PLUGIN_HANDLED;
+}
+
+public CmdNoclip(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1) || !RequirePlayerAdmin(id))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    if (!get_pcvar_num(g_pcvarAllowNoclip))
+    {
+        client_print(id, print_chat, "[HLDM Admin] noclip disabled by server config.");
+        return PLUGIN_HANDLED;
+    }
+
+    if (!is_user_alive(id))
+    {
+        client_print(id, print_chat, "[HLDM Admin] noclip requires a living player.");
+        return PLUGIN_HANDLED;
+    }
+
+    new bool:enable = !g_adminNoclip[id];
+    if (read_argc() >= 2)
+    {
+        new argument[8];
+        read_argv(1, argument, charsmax(argument));
+        enable = bool:(str_to_num(argument) != 0);
+    }
+
+    g_adminNoclip[id] = enable;
+    set_pev(id, pev_movetype, enable ? MOVETYPE_NOCLIP : MOVETYPE_WALK);
+    client_print(id, print_chat, "[HLDM Admin] noclip %s.", enable ? "ON" : "OFF");
+    return PLUGIN_HANDLED;
+}
+
+public CmdPlayerMenu(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1) || !RequirePlayerAdmin(id))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    ShowPlayerMenu(id);
+    return PLUGIN_HANDLED;
+}
+
+public PlayerMenuHandler(id, menu, item)
+{
+    if (item == MENU_EXIT)
+    {
+        menu_destroy(menu);
+        return PLUGIN_HANDLED;
+    }
+
+    new access, callback, info[8], displayName[64];
+    menu_item_getinfo(menu, item, access, info, charsmax(info), displayName, charsmax(displayName), callback);
+    menu_destroy(menu);
+
+    new target = str_to_num(info);
+    if (!IsValidTarget(id, target))
+    {
+        client_print(id, print_chat, "[HLDM Admin] target left or became unavailable.");
+        return PLUGIN_HANDLED;
+    }
+
+    g_selectedTarget[id] = target;
+    ShowActionMenu(id, target);
+    return PLUGIN_HANDLED;
+}
+
+public ActionMenuHandler(id, menu, item)
+{
+    if (item == MENU_EXIT)
+    {
+        menu_destroy(menu);
+        ShowPlayerMenu(id);
+        return PLUGIN_HANDLED;
+    }
+
+    new access, callback, info[8], displayName[64];
+    menu_item_getinfo(menu, item, access, info, charsmax(info), displayName, charsmax(displayName), callback);
+    menu_destroy(menu);
+
+    new target = g_selectedTarget[id];
+    if (!IsValidTarget(id, target))
+    {
+        client_print(id, print_chat, "[HLDM Admin] target left or became unavailable.");
+        return PLUGIN_HANDLED;
+    }
+
+    switch (str_to_num(info))
+    {
+        case 1: PunishTarget(id, target, true);
+        case 2: UntrapTarget(id, target);
+        case 3: PrintTargetStatus(id, target);
+        case 4: user_kill(target, 1);
+    }
+
+    return PLUGIN_HANDLED;
+}
+
+public CmdPunish(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 2))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    new argument[64];
+    read_argv(1, argument, charsmax(argument));
+    new target = cmd_target(id, argument, CMDTARGET_NO_BOTS | CMDTARGET_OBEY_IMMUNITY);
+
+    if (!target || !IsValidTarget(id, target))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    PunishTarget(id, target, true);
     return PLUGIN_HANDLED;
 }
 
@@ -147,38 +324,29 @@ public CmdAimAction(id, level, cid)
     new target, body;
     get_user_aiming(id, target, body, 8192);
 
-    if (!IsLivePlayer(target) || target == id)
+    if (!IsValidTarget(id, target))
     {
-        client_print(id, print_chat, "[HLDM Admin] No live player under crosshair.");
-        console_print(id, "[HLDM Admin] No live player under crosshair.");
+        client_print(id, print_chat, "[HLDM Admin] no live non-admin player under crosshair.");
         return PLUGIN_HANDLED;
     }
 
     if (equali(action, "status"))
     {
         PrintAimStatus(id, target, body);
-        return PLUGIN_HANDLED;
     }
-
-    new userId = get_user_userid(target);
-
-    if (equali(action, "trap"))
+    else if (equali(action, "trap"))
     {
-        server_cmd("amx_trap #%d", userId);
-        server_exec();
-        client_print(id, print_chat, "[HLDM Admin] Trap requested for #%d.", userId);
-        return PLUGIN_HANDLED;
+        PunishTarget(id, target, true);
     }
-
-    if (equali(action, "untrap"))
+    else if (equali(action, "untrap"))
     {
-        server_cmd("amx_untrap #%d", userId);
-        server_exec();
-        client_print(id, print_chat, "[HLDM Admin] Untrap requested for #%d.", userId);
-        return PLUGIN_HANDLED;
+        UntrapTarget(id, target);
+    }
+    else
+    {
+        console_print(id, "Usage: amx_ac_aim <status|trap|untrap>");
     }
 
-    console_print(id, "Usage: amx_ac_aim <status|trap|untrap>");
     return PLUGIN_HANDLED;
 }
 
@@ -189,9 +357,10 @@ public CmdBinds(id, level, cid)
         return PLUGIN_HANDLED;
     }
 
+    console_print(id, "bind ^"F5^" ^"amx_ac_noclip^"");
     console_print(id, "bind ^"F6^" ^"amx_ac_esp^"");
     console_print(id, "bind ^"F7^" ^"amx_ac_esp_mode^"");
-    console_print(id, "bind ^"F8^" ^"amx_ac_aim status^"");
+    console_print(id, "bind ^"F8^" ^"amx_ac_menu^"");
     console_print(id, "bind ^"F9^" ^"amx_ac_aim trap^"");
     console_print(id, "bind ^"F10^" ^"amx_ac_aim untrap^"");
     console_print(id, "bind ^"F11^" ^"amx_ac_status^"");
@@ -259,6 +428,149 @@ public TaskRender()
     }
 }
 
+public TaskScanner()
+{
+    if (!get_pcvar_num(g_pcvarEnabled) || !get_pcvar_num(g_pcvarScannerHud))
+    {
+        return;
+    }
+
+    for (new viewer = 1; viewer <= MaxClients; viewer++)
+    {
+        if (!g_adminScanner[viewer] || !is_user_connected(viewer) || !is_user_admin(viewer))
+        {
+            continue;
+        }
+
+        ShowScannerHud(viewer);
+    }
+}
+
+stock ShowPlayerMenu(id)
+{
+    new menu = menu_create("\rHLDM player control", "PlayerMenuHandler");
+    new count = 0;
+
+    for (new target = 1; target <= MaxClients; target++)
+    {
+        if (!IsValidTarget(id, target))
+        {
+            continue;
+        }
+
+        new name[32], model[32], itemText[96], info[8];
+        get_user_name(target, name, charsmax(name));
+        get_user_info(target, "model", model, charsmax(model));
+        formatex(itemText, charsmax(itemText), "#%d %s \y[%s, %d HP]", get_user_userid(target), name, model, get_user_health(target));
+        num_to_str(target, info, charsmax(info));
+        menu_additem(menu, itemText, info);
+        count++;
+    }
+
+    if (!count)
+    {
+        menu_destroy(menu);
+        client_print(id, print_chat, "[HLDM Admin] no punishable players connected.");
+        return;
+    }
+
+    menu_setprop(menu, MPROP_EXITNAME, "Exit");
+    menu_display(id, menu);
+}
+
+stock ShowActionMenu(id, target)
+{
+    new name[32], title[96];
+    get_user_name(target, name, charsmax(name));
+    formatex(title, charsmax(title), "\rTarget: \w%s \y#%d", name, get_user_userid(target));
+
+    new menu = menu_create(title, "ActionMenuHandler");
+    menu_additem(menu, "\rHARD TRAP + SLAY NOW", "1");
+    menu_additem(menu, "\yRemove trap", "2");
+    menu_additem(menu, "Show full status", "3");
+    menu_additem(menu, "Slay once", "4");
+    menu_setprop(menu, MPROP_EXITNAME, "Back");
+    menu_display(id, menu);
+}
+
+stock PunishTarget(admin, target, bool:slayNow)
+{
+    if (!IsValidTarget(admin, target))
+    {
+        return;
+    }
+
+    new userId = get_user_userid(target);
+    new name[32];
+    get_user_name(target, name, charsmax(name));
+
+    server_cmd("amx_trap #%d", userId);
+    server_exec();
+
+    if (slayNow && is_user_alive(target))
+    {
+        user_kill(target, 1);
+    }
+
+    if (get_pcvar_num(g_pcvarPublicPunish))
+    {
+        client_print(0, print_chat, "[SERVER] %s was corrected by anticheat.", name);
+    }
+
+    client_print(admin, print_chat, "[HLDM Admin] HARD trap applied to #%d %s.", userId, name);
+    log_amx("Admin index %d applied hard trap to #%d %s", admin, userId, name);
+}
+
+stock UntrapTarget(admin, target)
+{
+    if (!is_user_connected(target))
+    {
+        return;
+    }
+
+    new userId = get_user_userid(target);
+    server_cmd("amx_untrap #%d", userId);
+    server_exec();
+    client_print(admin, print_chat, "[HLDM Admin] trap removed from #%d.", userId);
+}
+
+stock ShowScannerHud(viewer)
+{
+    new output[512], length = 0;
+    length += formatex(output[length], charsmax(output) - length, "HLDM DEBUG SCANNER^n");
+
+    new Float:viewerOrigin[3];
+    pev(viewer, pev_origin, viewerOrigin);
+
+    for (new target = 1; target <= MaxClients && length < charsmax(output) - 64; target++)
+    {
+        if (target == viewer || !IsLivePlayer(target))
+        {
+            continue;
+        }
+
+        new name[32], model[32], Float:targetOrigin[3];
+        get_user_name(target, name, charsmax(name));
+        get_user_info(target, "model", model, charsmax(model));
+        pev(target, pev_origin, targetOrigin);
+
+        new distance = floatround(floatsqroot(VectorDistanceSquared(viewerOrigin, targetOrigin)));
+        length += formatex(
+            output[length],
+            charsmax(output) - length,
+            "#%d %-14s HP:%3d D:%4d M:%s^n",
+            get_user_userid(target),
+            name,
+            get_user_health(target),
+            distance,
+            model
+        );
+    }
+
+    set_hudmessage(180, 230, 255, 0.01, 0.12, 0, 0.0, 1.1, 0.0, 0.0, 3);
+    show_hudmessage(viewer, "%s", output);
+}
+
 stock DrawTargetOverlay(viewer, target, bool:isAimed)
 {
     new red = 40;
@@ -284,20 +596,26 @@ stock DrawTargetOverlay(viewer, target, bool:isAimed)
 
     switch (g_adminMode[viewer])
     {
-        case ESP_MODE_HULL:
-        {
-            DrawPlayerHull(viewer, target, red, green, blue);
-        }
-        case ESP_MODE_ZONES:
-        {
-            DrawBodyZones(viewer, target, red, green, blue);
-        }
+        case ESP_MODE_HULL: DrawPlayerHull(viewer, target, red, green, blue);
+        case ESP_MODE_ZONES: DrawBodyZones(viewer, target, red, green, blue);
         default:
         {
             DrawPlayerHull(viewer, target, red, green, blue);
             DrawBodyZones(viewer, target, red, green, blue);
         }
     }
+
+    DrawDirectionPillar(viewer, target, red, green, blue);
+}
+
+stock DrawDirectionPillar(viewer, target, red, green, blue)
+{
+    new Float:start[3], Float:finish[3];
+    pev(target, pev_origin, start);
+    finish[0] = start[0];
+    finish[1] = start[1];
+    finish[2] = start[2] + 160.0;
+    DrawLine(viewer, start, finish, red, green, blue);
 }
 
 stock DrawPlayerHull(viewer, target, red, green, blue)
@@ -367,12 +685,10 @@ stock DrawBox(viewer, const Float:minimum[3], const Float:maximum[3], red, green
     DrawLine(viewer, corner[1], corner[2], red, green, blue);
     DrawLine(viewer, corner[2], corner[3], red, green, blue);
     DrawLine(viewer, corner[3], corner[0], red, green, blue);
-
     DrawLine(viewer, corner[4], corner[5], red, green, blue);
     DrawLine(viewer, corner[5], corner[6], red, green, blue);
     DrawLine(viewer, corner[6], corner[7], red, green, blue);
     DrawLine(viewer, corner[7], corner[4], red, green, blue);
-
     DrawLine(viewer, corner[0], corner[4], red, green, blue);
     DrawLine(viewer, corner[1], corner[5], red, green, blue);
     DrawLine(viewer, corner[2], corner[6], red, green, blue);
@@ -427,16 +743,24 @@ stock ShowAimHud(viewer, target, body)
 
 stock PrintAimStatus(viewer, target, body)
 {
-    new name[32], authid[40], ip[32], model[32], bodyName[16];
+    PrintTargetStatus(viewer, target);
+
+    new bodyName[16];
+    GetBodyName(body, bodyName, charsmax(bodyName));
+    client_print(viewer, print_chat, "[HLDM Admin] aimed hitgroup=%s", bodyName);
+}
+
+stock PrintTargetStatus(viewer, target)
+{
+    new name[32], authid[40], ip[32], model[32];
     get_user_name(target, name, charsmax(name));
     get_user_authid(target, authid, charsmax(authid));
     get_user_ip(target, ip, charsmax(ip), 1);
     get_user_info(target, "model", model, charsmax(model));
-    GetBodyName(body, bodyName, charsmax(bodyName));
 
     console_print(
         viewer,
-        "[HLDM Admin] #%d %s <%s> ip=%s model=%s hp=%d armor=%d aimed=%s",
+        "[HLDM Admin] #%d %s <%s> ip=%s model=%s hp=%d armor=%d ping=%d",
         get_user_userid(target),
         name,
         authid,
@@ -444,20 +768,30 @@ stock PrintAimStatus(viewer, target, body)
         model,
         get_user_health(target),
         get_user_armor(target),
-        bodyName
+        get_user_ping(target)
     );
     client_print(viewer, print_chat, "[HLDM Admin] #%d %s <%s> model=%s", get_user_userid(target), name, authid, model);
 }
 
 stock bool:RequirePlayerAdmin(id)
 {
-    if (id < 1 || id > MaxClients || !is_user_connected(id))
+    if (id < 1 || id > MaxClients || !is_user_connected(id) || !is_user_admin(id))
     {
-        console_print(id, "[HLDM Admin] This command requires an in-game admin client.");
+        console_print(id, "[HLDM Admin] this command requires an in-game administrator.");
         return false;
     }
 
     return true;
+}
+
+stock bool:IsValidTarget(admin, target)
+{
+    return target >= 1
+        && target <= MaxClients
+        && target != admin
+        && is_user_connected(target)
+        && !is_user_admin(target)
+        && !is_user_bot(target);
 }
 
 stock bool:IsLivePlayer(id)
@@ -539,9 +873,20 @@ stock GetBodyName(body, output[], outputLength)
     }
 }
 
+stock RestoreMovement(id)
+{
+    if (id >= 1 && id <= MaxClients && is_user_connected(id) && g_adminNoclip[id])
+    {
+        set_pev(id, pev_movetype, MOVETYPE_WALK);
+    }
+}
+
 stock ResetAdmin(id)
 {
     g_adminEsp[id] = false;
+    g_adminScanner[id] = false;
+    g_adminNoclip[id] = false;
+    g_selectedTarget[id] = 0;
     g_adminMode[id] = ClampInt(get_pcvar_num(g_pcvarDefaultMode), ESP_MODE_HULL, ESP_MODE_BOTH);
 }
 
