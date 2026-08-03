@@ -1,0 +1,51 @@
+name: Fix chaos symbols
+
+on:
+  push:
+    branches: ["feature/chaos-punishments-v1"]
+    paths:
+      - "docs/CHAOS_FIX_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/chaos-punishments-v1
+
+      - name: Rename reserved Pawn vector identifiers
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/hldm_chaos.sma")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "new Float:forward[3], Float:right[3], Float:up[3], Float:velocity[3];",
+              "new Float:forwardVector[3], Float:rightVector[3], Float:upVector[3], Float:velocity[3];",
+              1,
+          )
+          text = text.replace(
+              "engfunc(EngFunc_AngleVectors, viewAngles, forward, right, up);",
+              "engfunc(EngFunc_AngleVectors, viewAngles, forwardVector, rightVector, upVector);",
+              1,
+          )
+          text = text.replace("forward[0] + right[0] * xSpread + up[0] * ySpread", "forwardVector[0] + rightVector[0] * xSpread + upVector[0] * ySpread", 1)
+          text = text.replace("forward[1] + right[1] * xSpread + up[1] * ySpread", "forwardVector[1] + rightVector[1] * xSpread + upVector[1] * ySpread", 1)
+          text = text.replace("forward[2] + right[2] * xSpread + up[2] * ySpread", "forwardVector[2] + rightVector[2] * xSpread + upVector[2] * ySpread", 1)
+          path.write_text(text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_chaos.sma
+          git commit -m "Fix reserved vector identifiers in chaos plugin"
+          git push origin HEAD:feature/chaos-punishments-v1
