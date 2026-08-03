@@ -18,6 +18,7 @@ replacements = {
     "engfunc(EngFunc_TraceLine, start, end, DONT_IGNORE_MONSTERS, id, trace);": "engfunc(EngFunc_TraceLine, traceStart, traceEnd, DONT_IGNORE_MONSTERS, id, trace);",
     "signal < Signal_Count": "signal < _:Signal_Count",
     "bit < Signal_Count": "bit < _:Signal_Count",
+    "for (new signal = 0; signal < _:Signal_Count; signal++)": "for (new SignalType:signal = Signal_SnapFire; signal < Signal_Count; signal++)",
 }
 
 changed = False
