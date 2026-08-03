@@ -8,22 +8,28 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 TRAP_SOURCE = ROOT / "src" / "hldm_trap.sma"
 DETECTOR_SOURCE = ROOT / "src" / "hldm_detector.sma"
+ADMIN_SOURCE = ROOT / "src" / "hldm_admin_tools.sma"
 TRAP_CONFIG = ROOT / "configs" / "plugins" / "hldm_trap.cfg"
 DETECTOR_CONFIG = ROOT / "configs" / "plugins" / "hldm_detector.cfg"
+ADMIN_CONFIG = ROOT / "configs" / "plugins" / "hldm_admin_tools.cfg"
 
 required_files = [
     TRAP_SOURCE,
     DETECTOR_SOURCE,
+    ADMIN_SOURCE,
     TRAP_CONFIG,
     DETECTOR_CONFIG,
+    ADMIN_CONFIG,
     ROOT / "README.md",
     ROOT / "CHANGELOG.md",
     ROOT / "docs" / "INSTALL_RU.md",
     ROOT / "docs" / "ARCHITECTURE.md",
     ROOT / "docs" / "TEST_PLAN.md",
     ROOT / "docs" / "DETECTOR_RU.md",
+    ROOT / "docs" / "ADMIN_TOOLS_RU.md",
     ROOT / "deploy" / "setup_hldm_server_windows.ps1",
     ROOT / "deploy" / "install_fresh_hlds_windows.ps1",
+    ROOT / "deploy" / "install_admin_tools_windows.ps1",
     ROOT / "deploy" / "uninstall_windows.ps1",
     ROOT / ".github" / "workflows" / "compile.yml",
 ]
@@ -34,8 +40,8 @@ for path in required_files:
         errors.append(f"missing required file: {path.relative_to(ROOT)}")
 
 source_files = sorted((ROOT / "src").glob("*.sma")) if (ROOT / "src").is_dir() else []
-if len(source_files) < 2:
-    errors.append("expected at least hldm_trap.sma and hldm_detector.sma")
+if len(source_files) < 3:
+    errors.append("expected trap, detector, and admin tools sources")
 
 for source_path in source_files:
     source = source_path.read_text(encoding="utf-8")
@@ -88,6 +94,16 @@ check_commands(
     ),
 )
 
+check_commands(
+    ADMIN_SOURCE,
+    (
+        "amx_ac_esp",
+        "amx_ac_esp_mode",
+        "amx_ac_aim",
+        "amx_ac_binds",
+    ),
+)
+
 if TRAP_SOURCE.is_file():
     trap_source = TRAP_SOURCE.read_text(encoding="utf-8")
     for guard in (
@@ -115,6 +131,18 @@ if DETECTOR_SOURCE.is_file():
         if guard not in detector_source:
             errors.append(f"hldm_detector.sma: missing detector contract: {guard}")
 
+if ADMIN_SOURCE.is_file():
+    admin_source = ADMIN_SOURCE.read_text(encoding="utf-8")
+    for guard in (
+        'AutoExecConfig(true, "hldm_admin_tools")',
+        "MSG_ONE_UNRELIABLE",
+        "is_user_admin(viewer)",
+        'server_cmd("amx_trap #%d"',
+        'server_cmd("amx_untrap #%d"',
+    ):
+        if guard not in admin_source:
+            errors.append(f"hldm_admin_tools.sma: missing local-admin contract: {guard}")
+
 
 def registered_cvars(path: Path) -> set[str]:
     if not path.is_file():
@@ -134,10 +162,13 @@ def configured_cvars(path: Path, prefix: str) -> set[str]:
     )
 
 
-for source_path, config_path, prefix in (
+source_config_pairs = (
     (TRAP_SOURCE, TRAP_CONFIG, "hldm_trap_"),
     (DETECTOR_SOURCE, DETECTOR_CONFIG, "hldm_ac_"),
-):
+    (ADMIN_SOURCE, ADMIN_CONFIG, "hldm_admin_"),
+)
+
+for source_path, config_path, prefix in source_config_pairs:
     registered = registered_cvars(source_path)
     configured = configured_cvars(config_path, prefix)
 
@@ -166,5 +197,8 @@ if errors:
         print(f"- {error}")
     sys.exit(1)
 
-all_cvars = registered_cvars(TRAP_SOURCE) | registered_cvars(DETECTOR_SOURCE)
+all_cvars: set[str] = set()
+for source_path, _, _ in source_config_pairs:
+    all_cvars |= registered_cvars(source_path)
+
 print(f"Contract check passed: {len(source_files)} source file(s), {len(all_cvars)} cvar(s).")
