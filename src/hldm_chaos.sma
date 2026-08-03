@@ -808,7 +808,7 @@ stock SpawnHornet(owner, Float:spread)
     }
 
     new Float:origin[3], Float:viewOffset[3], Float:viewAngles[3];
-    new Float:forward[3], Float:right[3], Float:up[3], Float:velocity[3];
+    new Float:forwardVector[3], Float:rightVector[3], Float:upVector[3], Float:velocity[3];
 
     pev(owner, pev_origin, origin);
     pev(owner, pev_view_ofs, viewOffset);
@@ -817,13 +817,13 @@ stock SpawnHornet(owner, Float:spread)
     origin[1] += viewOffset[1];
     origin[2] += viewOffset[2];
 
-    engfunc(EngFunc_AngleVectors, viewAngles, forward, right, up);
+    engfunc(EngFunc_AngleVectors, viewAngles, forwardVector, rightVector, upVector);
 
     new Float:xSpread = random_float(-spread, spread);
     new Float:ySpread = random_float(-spread, spread);
-    velocity[0] = forward[0] + right[0] * xSpread + up[0] * ySpread;
-    velocity[1] = forward[1] + right[1] * xSpread + up[1] * ySpread;
-    velocity[2] = forward[2] + right[2] * xSpread + up[2] * ySpread;
+    velocity[0] = forwardVector[0] + rightVector[0] * xSpread + upVector[0] * ySpread;
+    velocity[1] = forwardVector[1] + rightVector[1] * xSpread + upVector[1] * ySpread;
+    velocity[2] = forwardVector[2] + rightVector[2] * xSpread + upVector[2] * ySpread;
     NormalizeVector(velocity);
 
     new Float:speed = ClampFloat(get_pcvar_float(g_pcvarBeeSpeed), 250.0, 1400.0);
