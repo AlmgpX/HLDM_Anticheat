@@ -121,14 +121,15 @@ if (-not [string]::IsNullOrWhiteSpace($AdminSteamId)) {
 $bindCfg = Join-Path $valveRoot "hldm_admin.cfg"
 $bindLines = @(
     "// HLDM Anticheat local admin binds"
+    "bind `"F5`" `"amx_ac_noclip`""
     "bind `"F6`" `"amx_ac_esp`""
     "bind `"F7`" `"amx_ac_esp_mode`""
-    "bind `"F8`" `"amx_ac_aim status`""
+    "bind `"F8`" `"amx_ac_menu`""
     "bind `"F9`" `"amx_ac_aim trap`""
     "bind `"F10`" `"amx_ac_aim untrap`""
     "bind `"F11`" `"amx_ac_status`""
     "bind `"F12`" `"amx_trap_list`""
-    "echo HLDM admin binds loaded: F6 ESP, F7 mode, F8 inspect, F9 trap, F10 untrap"
+    "echo HLDM admin binds loaded: F5 noclip, F6 ESP, F7 mode, F8 player menu, F9 trap, F10 untrap"
 )
 Write-Utf8NoBom -Path $bindCfg -Lines $bindLines
 
