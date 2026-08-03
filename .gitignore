@@ -1,0 +1,14 @@
+# Build output
+build/*.amxx
+.amxx/
+
+# Local server/runtime files
+*.vault
+*.log
+*.dem
+
+# Editors and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store

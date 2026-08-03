@@ -1,0 +1,57 @@
+name: Compile AMXX
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  AMXX_BUILD: "5479"
+  AMXX_ARCHIVE: "amxmodx-1.10.0-git5479-base-linux.tar.gz"
+
+jobs:
+  compile:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Repository contract
+        run: python3 tools/check_contract.py
+
+      - name: Install 32-bit runtime
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y libc6-i386 lib32stdc++6
+
+      - name: Download AMX Mod X compiler
+        run: |
+          curl --fail --location --retry 3 \
+            --output /tmp/amxx.tar.gz \
+            "https://www.amxmodx.org/amxxdrop/1.10/${AMXX_ARCHIVE}"
+          mkdir -p .amxx
+          tar -xzf /tmp/amxx.tar.gz -C .amxx
+          chmod +x .amxx/addons/amxmodx/scripting/amxxpc
+
+      - name: Compile plugin
+        run: |
+          set -euxo pipefail
+          SCRIPTING="$PWD/.amxx/addons/amxmodx/scripting"
+          cp src/hldm_trap.sma "$SCRIPTING/hldm_trap.sma"
+          cd "$SCRIPTING"
+          ./amxxpc hldm_trap.sma
+          test -f hldm_trap.amxx
+          mkdir -p "$GITHUB_WORKSPACE/build"
+          cp hldm_trap.amxx "$GITHUB_WORKSPACE/build/hldm_trap.amxx"
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: hldm-trap-amxx-${{ env.AMXX_BUILD }}
+          path: build/hldm_trap.amxx
+          if-no-files-found: error
