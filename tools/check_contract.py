@@ -156,7 +156,7 @@ if old_config.exists():
 workflow = ROOT / ".github" / "workflows" / "compile.yml"
 if workflow.is_file():
     workflow_text = workflow.read_text(encoding="utf-8")
-    for expected in ("src\\*.sma", "build/*.amxx", "hldm_detector.amxx"):
+    for expected in ("src\\*.sma", "build/*.amxx", "Expected at least trap and detector sources"):
         if expected not in workflow_text:
             errors.append(f"compile.yml: expected packaging/build token missing: {expected}")
 
