@@ -77,13 +77,10 @@ public plugin_init()
 
 public plugin_end()
 {
-    if (g_vault != INVALID_HANDLE)
-    {
-        nvault_close(g_vault);
-        g_vault = INVALID_HANDLE;
-    }
+    // nVault closes plugin-owned handles during module shutdown. Explicitly
+    // closing here can run after nVault teardown on listen-server shutdown.
+    g_vault = INVALID_HANDLE;
 }
-
 public client_connect(id)
 {
     ResetClient(id);
