@@ -1,0 +1,42 @@
+name: Patch Hornet hard-fix warning
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "docs/HORNET_HARDFIX_WARNING_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hornetgun-hardfix-v1
+
+      - name: Fix bool tag warning
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/hldm_hornet_fix.sma")
+          text = path.read_text(encoding="utf-8")
+          old = "    return entity > MaxClients && entity <= MAX_TRACKED_ENTITIES && pev_valid(entity);\n"
+          new = "    return bool:(entity > MaxClients && entity <= MAX_TRACKED_ENTITIES && pev_valid(entity));\n"
+          if old not in text:
+              raise SystemExit("IsTrackableEntity return anchor not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_hornet_fix.sma
+          git commit -m "Fix Hornet Hard Fix bool tag warning"
+          git push origin HEAD:fix/hornetgun-hardfix-v1
