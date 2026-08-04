@@ -134,7 +134,7 @@ public plugin_cfg()
 
     if (hostname[0])
     {
-        server_cmd("hostname ^\"%s^\"", hostname);
+        server_cmd("hostname ^"%s^"", hostname);
         server_exec();
     }
 }
