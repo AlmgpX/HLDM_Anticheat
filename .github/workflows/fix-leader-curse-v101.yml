@@ -1,0 +1,214 @@
+name: Fix Leader Curse v1.0.1
+
+on:
+  push:
+    branches: ["fix/leader-curse-v1.0.1"]
+    paths:
+      - "docs/LEADER_CURSE_V101_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/leader-curse-v1.0.1
+
+      - name: Replace ammo conversion with bolt explosion surprise
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          source = Path("src/hldm_leader_curse.sma")
+          text = source.read_text(encoding="utf-8")
+
+          text = text.replace('#include <fakemeta>\n#include <fun>', '#include <fakemeta>\n#include <fun>\n#include <hamsandwich>', 1)
+          text = text.replace('#define PLUGIN_VERSION "1.0.0"', '#define PLUGIN_VERSION "1.0.1"', 1)
+          text = text.replace('new bool:g_convertingAmmo[MAX_PLAYERS + 1];\n', '', 1)
+          text = text.replace('new g_pcvarAmmoMultiplier;\n', 'new g_pcvarAmmoExplosionDamage;\nnew g_pcvarAmmoExplosionRadius;\n', 1)
+
+          text = text.replace(
+              '    g_pcvarAmmoChance = register_cvar("hldm_leadercurse_ammo_conversion_chance", "28");\n'
+              '    g_pcvarAmmoMultiplier = register_cvar("hldm_leadercurse_ammo_multiplier", "3");\n',
+              '    g_pcvarAmmoChance = register_cvar("hldm_leadercurse_ammo_explosion_chance", "28");\n'
+              '    g_pcvarAmmoExplosionDamage = register_cvar("hldm_leadercurse_ammo_explosion_damage", "40.0");\n'
+              '    g_pcvarAmmoExplosionRadius = register_cvar("hldm_leadercurse_ammo_explosion_radius", "96.0");\n',
+              1,
+          )
+
+          text = text.replace(
+              '    g_explosionSprite = precache_model("sprites/zerogxplode.spr");\n',
+              '    g_explosionSprite = precache_model("sprites/zerogxplode.spr");\n'
+              '    precache_sound("weapons/explode3.wav");\n',
+              1,
+          )
+
+          start = text.index('public OnEntityTouch(entity, player)')
+          end = text.index('\npublic OnEmitSound(', start)
+          replacement = r'''public OnEntityTouch(entity, player)
+{
+    if (!get_pcvar_num(g_pcvarEnabled)
+        || player < 1
+        || player > MaxClients
+        || !is_user_alive(player)
+        || g_tier[player] < 1
+        || !pev_valid(entity))
+    {
+        return FMRES_IGNORED;
+    }
+
+    new classname[32];
+    pev(entity, pev_classname, classname, charsmax(classname));
+    if (!IsConvertibleAmmo(classname))
+    {
+        return FMRES_IGNORED;
+    }
+
+    new Float:now = get_gametime();
+    new Float:nextEligible;
+    pev(entity, pev_fuser4, nextEligible);
+    if (now < nextEligible)
+    {
+        return FMRES_IGNORED;
+    }
+
+    // Prevent a full-ammo player standing on one box from rolling the chance every frame.
+    set_pev(entity, pev_fuser4, now + 2.5);
+
+    new chance = ClampInt(get_pcvar_num(g_pcvarAmmoChance), 0, 100);
+    if (random_num(1, 100) > chance)
+    {
+        return FMRES_IGNORED;
+    }
+
+    new Float:origin[3];
+    pev(entity, pev_origin, origin);
+    origin[2] += 8.0;
+
+    VisualExplosion(origin, 7);
+    engfunc(EngFunc_EmitAmbientSound, 0, origin, "weapons/explode3.wav", 0.85, ATTN_NORM, 0, PITCH_NORM);
+    RadiusDamagePlayers(
+        entity,
+        player,
+        origin,
+        ClampFloat(get_pcvar_float(g_pcvarAmmoExplosionDamage), 0.0, 200.0),
+        ClampFloat(get_pcvar_float(g_pcvarAmmoExplosionRadius), 16.0, 512.0)
+    );
+
+    set_hudmessage(255, 90, 30, -1.0, 0.72, 0, 0.0, 2.5, 0.05, 0.15, 4);
+    show_hudmessage(player, "AMMO SURPRISE^nCROSSBOW-BOLT EXPLOSION SPAWNED AT PICKUP");
+    client_print(player, print_chat, "[ZONA] The ammo pickup spawned a crossbow-bolt explosion. The ammunition itself remains ordinary.");
+
+    if (get_pcvar_num(g_pcvarPublicAmmo))
+    {
+        new name[32];
+        get_user_name(player, name, charsmax(name));
+        client_print(0, print_chat, "[ZONA] %s touched ammunition. The box briefly became an explosive crossbow bolt.", name);
+    }
+
+    // Do not remove or replace the pickup. Native Half-Life pickup logic continues.
+    return FMRES_IGNORED;
+}
+'''
+          text = text[:start] + replacement + text[end:]
+
+          anchor = 'stock VisualExplosion(const Float:origin[3], scale)\n'
+          helper = r'''stock RadiusDamagePlayers(inflictor, attacker, const Float:origin[3], Float:maximumDamage, Float:radius)
+{
+    if (maximumDamage <= 0.0 || radius <= 0.0)
+    {
+        return;
+    }
+
+    for (new target = 1; target <= MaxClients; target++)
+    {
+        if (!is_user_alive(target))
+        {
+            continue;
+        }
+
+        new Float:targetOrigin[3];
+        pev(target, pev_origin, targetOrigin);
+
+        new Float:x = targetOrigin[0] - origin[0];
+        new Float:y = targetOrigin[1] - origin[1];
+        new Float:z = targetOrigin[2] - origin[2];
+        new Float:distance = floatsqroot(x * x + y * y + z * z);
+        if (distance > radius)
+        {
+            continue;
+        }
+
+        new Float:damage = maximumDamage * (1.0 - distance / radius);
+        if (damage < 1.0)
+        {
+            damage = 1.0;
+        }
+
+        ExecuteHamB(Ham_TakeDamage, target, inflictor, attacker, damage, DMG_BLAST);
+    }
+}
+
+'''
+          if anchor not in text:
+              raise SystemExit("VisualExplosion anchor missing")
+          text = text.replace(anchor, helper + anchor, 1)
+
+          text = text.replace(
+              '    g_convertingAmmo[id] = false;\n',
+              '',
+              1,
+          )
+
+          text = text.replace(
+              '    "LEAD +5: THE AMMO DEPARTMENT HAS JOINED A CROSSBOW CULT",\n',
+              '    "LEAD +5: AMMO PICKUPS MAY COSPLAY AS EXPLOSIVE CROSSBOW BOLTS",\n',
+              1,
+          )
+          text = text.replace(
+              '    "CONGRATULATIONS: ORDINARY AMMO IS NOW A RUMOR"\n',
+              '    "CONGRATULATIONS: THE AMMO FLOOR IS NOW AN EXPLOSION LOTTERY"\n',
+              1,
+          )
+
+          source.write_text(text, encoding="utf-8", newline="\n")
+
+          cfg = Path("configs/plugins/hldm_leader_curse.cfg")
+          cfg.write_text(
+              '''// HLDM Leader Curse 1.0.1\n\n'''
+              '''hldm_leadercurse_enabled "1"\n'''
+              '''hldm_leadercurse_admin_immunity "1"\n'''
+              '''hldm_leadercurse_minimum_others "1"\n\n'''
+              '''// Score lead over the average frag count of all other connected players.\n'''
+              '''hldm_leadercurse_threshold_ammo "5"\n'''
+              '''hldm_leadercurse_threshold_steps "10"\n'''
+              '''hldm_leadercurse_threshold_selfkill "15"\n\n'''
+              '''// At +5 lead, touching an ammo pickup may spawn a mini explosive-crossbow-bolt blast.\n'''
+              '''// The normal ammunition pickup is not replaced.\n'''
+              '''hldm_leadercurse_ammo_explosion_chance "28"\n'''
+              '''hldm_leadercurse_ammo_explosion_damage "40.0"\n'''
+              '''hldm_leadercurse_ammo_explosion_radius "96.0"\n\n'''
+              '''// Threshold announcements are public; individual recurring taunts are target-only.\n'''
+              '''hldm_leadercurse_public_thresholds "1"\n'''
+              '''hldm_leadercurse_public_ammo "0"\n\n'''
+              '''// Experimental-server announcement and recurring target taunts.\n'''
+              '''hldm_leadercurse_notice_interval "90.0"\n'''
+              '''hldm_leadercurse_taunt_min "12.0"\n'''
+              '''hldm_leadercurse_taunt_max "20.0"\n''',
+              encoding="utf-8",
+              newline="\n",
+          )
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_leader_curse.sma configs/plugins/hldm_leader_curse.cfg
+          git commit -m "Fix Leader Curse ammo surprise semantics"
+          git push origin HEAD:fix/leader-curse-v1.0.1
