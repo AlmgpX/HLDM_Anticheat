@@ -460,7 +460,7 @@ stock bool:IsHornetEntity(entity)
 
     new classname[24];
     pev(entity, pev_classname, classname, charsmax(classname));
-    return equal(classname, "hornet");
+    return bool:equal(classname, "hornet");
 }
 
 stock bool:IsTrackableEntity(entity)
