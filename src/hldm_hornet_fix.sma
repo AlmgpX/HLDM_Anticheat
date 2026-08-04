@@ -465,7 +465,7 @@ stock bool:IsHornetEntity(entity)
 
 stock bool:IsTrackableEntity(entity)
 {
-    return entity > MaxClients && entity <= MAX_TRACKED_ENTITIES && pev_valid(entity);
+    return bool:(entity > MaxClients && entity <= MAX_TRACKED_ENTITIES && pev_valid(entity));
 }
 
 stock ResetTrackedEntity(entity)
