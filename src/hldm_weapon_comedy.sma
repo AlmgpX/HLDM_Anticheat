@@ -251,7 +251,7 @@ stock SpawnScatterBolt(owner)
     }
 
     new Float:origin[3], Float:viewOffset[3], Float:angles[3];
-    new Float:forward[3], Float:right[3], Float:up[3], Float:velocity[3];
+    new Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3];
 
     pev(owner, pev_origin, origin);
     pev(owner, pev_view_ofs, viewOffset);
@@ -260,15 +260,15 @@ stock SpawnScatterBolt(owner)
     origin[1] += viewOffset[1];
     origin[2] += viewOffset[2];
 
-    engfunc(EngFunc_AngleVectors, angles, forward, right, up);
-    origin[0] += forward[0] * 24.0;
-    origin[1] += forward[1] * 24.0;
-    origin[2] += forward[2] * 24.0;
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
+    origin[0] += forwardVector[0] * 24.0;
+    origin[1] += forwardVector[1] * 24.0;
+    origin[2] += forwardVector[2] * 24.0;
 
     new Float:spread = ClampFloat(get_pcvar_float(g_pcvarPythonSpread), 0.01, 0.75);
-    velocity[0] = forward[0] + right[0] * random_float(-spread, spread) + up[0] * random_float(-spread, spread);
-    velocity[1] = forward[1] + right[1] * random_float(-spread, spread) + up[1] * random_float(-spread, spread);
-    velocity[2] = forward[2] + right[2] * random_float(-spread, spread) + up[2] * random_float(-spread, spread);
+    velocity[0] = forwardVector[0] + right[0] * random_float(-spread, spread) + up[0] * random_float(-spread, spread);
+    velocity[1] = forwardVector[1] + right[1] * random_float(-spread, spread) + up[1] * random_float(-spread, spread);
+    velocity[2] = forwardVector[2] + right[2] * random_float(-spread, spread) + up[2] * random_float(-spread, spread);
     NormalizeVector(velocity);
 
     new Float:speed = ClampFloat(get_pcvar_float(g_pcvarPythonBoltSpeed), 500.0, 2600.0);
@@ -291,15 +291,15 @@ stock SpawnScatterBolt(owner)
 
 stock ApplyPythonRecoil(id)
 {
-    new Float:angles[3], Float:forward[3], Float:right[3], Float:up[3], Float:velocity[3], Float:punch[3];
+    new Float:angles[3], Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3], Float:punch[3];
     pev(id, pev_v_angle, angles);
     pev(id, pev_velocity, velocity);
     pev(id, pev_punchangle, punch);
-    engfunc(EngFunc_AngleVectors, angles, forward, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
 
     new Float:recoil = ClampFloat(get_pcvar_float(g_pcvarPythonRecoil), 0.0, 800.0);
-    velocity[0] -= forward[0] * recoil;
-    velocity[1] -= forward[1] * recoil;
+    velocity[0] -= forwardVector[0] * recoil;
+    velocity[1] -= forwardVector[1] * recoil;
     velocity[2] += 75.0;
     set_pev(id, pev_velocity, velocity);
 
@@ -317,7 +317,7 @@ stock SpawnHomingRocket(owner, Float:sideOffset)
     }
 
     new Float:origin[3], Float:viewOffset[3], Float:angles[3];
-    new Float:forward[3], Float:right[3], Float:up[3], Float:velocity[3];
+    new Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3];
     pev(owner, pev_origin, origin);
     pev(owner, pev_view_ofs, viewOffset);
     pev(owner, pev_v_angle, angles);
@@ -325,15 +325,15 @@ stock SpawnHomingRocket(owner, Float:sideOffset)
     origin[1] += viewOffset[1];
     origin[2] += viewOffset[2];
 
-    engfunc(EngFunc_AngleVectors, angles, forward, right, up);
-    origin[0] += forward[0] * 58.0 + right[0] * sideOffset;
-    origin[1] += forward[1] * 58.0 + right[1] * sideOffset;
-    origin[2] += forward[2] * 58.0 + 4.0;
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
+    origin[0] += forwardVector[0] * 58.0 + right[0] * sideOffset;
+    origin[1] += forwardVector[1] * 58.0 + right[1] * sideOffset;
+    origin[2] += forwardVector[2] * 58.0 + 4.0;
 
     new Float:speed = ClampFloat(get_pcvar_float(g_pcvarRocketSpeed), 300.0, 1600.0);
-    velocity[0] = forward[0] * speed;
-    velocity[1] = forward[1] * speed;
-    velocity[2] = forward[2] * speed;
+    velocity[0] = forwardVector[0] * speed;
+    velocity[1] = forwardVector[1] * speed;
+    velocity[2] = forwardVector[2] * speed;
 
     new entity = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "rpg_rocket"));
     if (!IsTrackable(entity))
@@ -490,9 +490,9 @@ stock SpawnSnarkBurst(owner, const Float:origin[3], count)
 
 stock ApplyGaussCorrection(id)
 {
-    new Float:angles[3], Float:forward[3], Float:right[3], Float:up[3], Float:velocity[3];
+    new Float:angles[3], Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3];
     pev(id, pev_v_angle, angles);
-    engfunc(EngFunc_AngleVectors, angles, forward, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
 
     new Float:impulse = ClampFloat(get_pcvar_float(g_pcvarGaussImpulse), 80.0, 900.0);
     if (random_num(0, 2) == 0)

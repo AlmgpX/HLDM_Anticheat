@@ -84,8 +84,8 @@ public plugin_init()
 
     AutoExecConfig(true, "hldm_population_manager");
 
-    set_task(12.0, "TaskPopulation", TASK_POPULATION, _, _, "b");
-    set_task(20.0, "TaskMonsters", TASK_MONSTERS, _, _, "b");
+    set_task(ClampFloat(get_pcvar_float(g_pcvarBotInterval), 2.0, 60.0), "TaskPopulation", TASK_POPULATION, _, _, "b");
+    set_task(ClampFloat(get_pcvar_float(g_pcvarMonsterInterval), 4.0, 120.0), "TaskMonsters", TASK_MONSTERS, _, _, "b");
 }
 
 public plugin_cfg()
