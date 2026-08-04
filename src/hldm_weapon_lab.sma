@@ -546,7 +546,7 @@ public TaskEntityTick()
     ProcessHornets(now);
     ProcessTripmines(now);
     ProcessGrenades(now);
-    ProcessSnarks(now);
+    ProcessSnarks();
 }
 
 stock HandleGlobalWeaponInput(id, weapon, buttons, pressed, Float:now)
@@ -821,7 +821,7 @@ stock ProcessGrenades(Float:now)
     }
 }
 
-stock ProcessSnarks(Float:now)
+stock ProcessSnarks()
 {
     new entity = -1;
     while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "monster_snark")) > 0)
@@ -1280,7 +1280,7 @@ stock RadiusDamagePlayers(inflictor, attacker, const Float:origin[3], Float:maxi
 
 stock VisualExplosion(const Float:origin[3], scale)
 {
-    message_begin(MSG_PVS, SVC_TEMPENTITY, origin);
+    engfunc(EngFunc_MessageBegin, MSG_PVS, SVC_TEMPENTITY, origin, 0);
     write_byte(TE_EXPLOSION_CUSTOM);
     engfunc(EngFunc_WriteCoord, origin[0]);
     engfunc(EngFunc_WriteCoord, origin[1]);
