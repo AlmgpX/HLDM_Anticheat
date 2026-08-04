@@ -6,7 +6,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Hornet Policy"
-#define PLUGIN_VERSION "2.0.0"
+#define PLUGIN_VERSION "2.1.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_TRACKED 2048
@@ -19,6 +19,7 @@ new bool:g_exploding[MAX_TRACKED + 1];
 new g_owner[MAX_TRACKED + 1];
 new Float:g_spawnTime[MAX_TRACKED + 1];
 new Float:g_expireTime[MAX_TRACKED + 1];
+new Float:g_nextWorldTouch[MAX_TRACKED + 1];
 
 new g_explosionSprite;
 new g_pcvarEnabled;
@@ -45,7 +46,7 @@ public plugin_init()
 
     g_pcvarEnabled = register_cvar("hldm_hornetpolicy_enabled", "1");
     g_pcvarMaxActive = register_cvar("hldm_hornetpolicy_max_active", "10");
-    g_pcvarLifetime = register_cvar("hldm_hornetpolicy_lifetime", "4.5");
+    g_pcvarLifetime = register_cvar("hldm_hornetpolicy_lifetime", "3.20");
     g_pcvarDamage = register_cvar("hldm_hornetpolicy_damage", "40.0");
     g_pcvarRadius = register_cvar("hldm_hornetpolicy_radius", "96.0");
     g_pcvarOwnerGrace = register_cvar("hldm_hornetpolicy_owner_grace", "0.30");
@@ -142,7 +143,12 @@ public OnTouchPre(entity, other)
         return FMRES_SUPERCEDE;
     }
 
-    BounceHornet(entity);
+    new Float:now = get_gametime();
+    if (now >= g_nextWorldTouch[entity])
+    {
+        g_nextWorldTouch[entity] = now + 0.08;
+        BounceHornet(entity);
+    }
     return FMRES_SUPERCEDE;
 }
 
@@ -254,6 +260,7 @@ stock TrackHornet(entity)
     g_owner[entity] = owner;
     g_spawnTime[entity] = get_gametime();
     g_expireTime[entity] = g_spawnTime[entity] + ClampFloat(get_pcvar_float(g_pcvarLifetime), 0.5, 15.0);
+    g_nextWorldTouch[entity] = 0.0;
 }
 
 stock CountOwnerHornets(owner)
@@ -448,6 +455,7 @@ stock ResetEntity(entity)
     g_owner[entity] = 0;
     g_spawnTime[entity] = 0.0;
     g_expireTime[entity] = 0.0;
+    g_nextWorldTouch[entity] = 0.0;
 }
 
 stock bool:NormalizeVector(Float:vector[3])

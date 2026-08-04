@@ -6,7 +6,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Comedy"
-#define PLUGIN_VERSION "2.0.0"
+#define PLUGIN_VERSION "2.1.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_TRACKED 2048
@@ -21,6 +21,7 @@
 new g_previousButtons[33];
 new bool:g_secondRocketPending[33];
 new Float:g_secondRocketTime[33];
+new Float:g_lastRocketVolley[33];
 new bool:g_gaussCorrectionPending[33];
 new Float:g_gaussCorrectionTime[33];
 
@@ -42,6 +43,8 @@ new g_pcvarRocketTurn;
 new g_pcvarRocketSnarks;
 new g_pcvarRocketDamage;
 new g_pcvarRocketRadius;
+new g_pcvarRocketCooldown;
+new g_pcvarRocketMaxActive;
 new g_pcvarComedyChance;
 new g_pcvarGaussImpulse;
 
@@ -97,6 +100,8 @@ public plugin_init()
     g_pcvarRocketSnarks = register_cvar("hldm_weaponcomedy_rocket_snarks", "3");
     g_pcvarRocketDamage = register_cvar("hldm_weaponcomedy_rocket_damage", "95.0");
     g_pcvarRocketRadius = register_cvar("hldm_weaponcomedy_rocket_radius", "180.0");
+    g_pcvarRocketCooldown = register_cvar("hldm_weaponcomedy_rocket_cooldown", "1.25");
+    g_pcvarRocketMaxActive = register_cvar("hldm_weaponcomedy_rocket_max_active", "4");
     g_pcvarComedyChance = register_cvar("hldm_weaponcomedy_text_chance", "38");
     g_pcvarGaussImpulse = register_cvar("hldm_weaponcomedy_gauss_impulse", "290.0");
 
@@ -124,8 +129,9 @@ public OnCmdStart(id, userCmd, randomSeed)
         return FMRES_IGNORED;
     }
 
-    new buttons = get_uc(userCmd, UC_Buttons);
-    new pressed = buttons & ~g_previousButtons[id];
+    new rawButtons = get_uc(userCmd, UC_Buttons);
+    new buttons = rawButtons;
+    new pressed = rawButtons & ~g_previousButtons[id];
     new weapon = get_user_weapon(id);
     new Float:now = get_gametime();
 
@@ -135,13 +141,22 @@ public OnCmdStart(id, userCmd, randomSeed)
     }
     else if (weapon == W_MP5 && (pressed & IN_ATTACK2))
     {
+        // Suppress the stock grenade exactly once, but remember the original
+        // button state. The previous code stored the cleared bit, so holding
+        // attack2 looked like a fresh press every frame and created a rocket storm.
         buttons &= ~IN_ATTACK2;
         set_uc(userCmd, UC_Buttons, buttons);
 
-        SpawnHomingRocket(id, 0.0);
-        g_secondRocketPending[id] = true;
-        g_secondRocketTime[id] = now + ClampFloat(get_pcvar_float(g_pcvarRocketDelay), 0.10, 1.5);
-        ShowFactoryLine(id);
+        new Float:cooldown = ClampFloat(get_pcvar_float(g_pcvarRocketCooldown), 0.35, 5.0);
+        if (now - g_lastRocketVolley[id] >= cooldown
+  && CountOwnerRockets(id) < ClampInt(get_pcvar_num(g_pcvarRocketMaxActive), 1, 12))
+        {
+  g_lastRocketVolley[id] = now;
+  SpawnHomingRocket(id, -10.0);
+  g_secondRocketPending[id] = true;
+  g_secondRocketTime[id] = now + ClampFloat(get_pcvar_float(g_pcvarRocketDelay), 0.10, 1.5);
+  ShowFactoryLine(id);
+        }
     }
     else if (weapon == W_GAUSS && (pressed & IN_ATTACK2))
     {
@@ -150,7 +165,7 @@ public OnCmdStart(id, userCmd, randomSeed)
         ShowFactoryLine(id);
     }
 
-    g_previousButtons[id] = buttons;
+    g_previousButtons[id] = rawButtons;
     return FMRES_IGNORED;
 }
 
@@ -309,6 +324,19 @@ stock ApplyPythonRecoil(id)
     set_pev(id, pev_punchangle, punch);
 }
 
+stock CountOwnerRockets(owner)
+{
+    new count;
+    for (new entity = MaxClients + 1; entity <= MAX_TRACKED; entity++)
+    {
+        if (g_customRocket[entity] && pev_valid(entity) && g_rocketOwner[entity] == owner)
+        {
+  count++;
+        }
+    }
+    return count;
+}
+
 stock SpawnHomingRocket(owner, Float:sideOffset)
 {
     if (!is_user_alive(owner))
@@ -335,15 +363,30 @@ stock SpawnHomingRocket(owner, Float:sideOffset)
     velocity[1] = forwardVector[1] * speed;
     velocity[2] = forwardVector[2] * speed;
 
-    new entity = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "rpg_rocket"));
+    if (CountOwnerRockets(owner) >= ClampInt(get_pcvar_num(g_pcvarRocketMaxActive), 1, 12))
+    {
+        return 0;
+    }
+
+    // Use a private info_target instead of the native rpg_rocket class.
+    // The native class was simultaneously handled by Weapon Lab and the game DLL,
+    // producing duplicate touch/explosion paths and entity storms.
+    new entity = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "info_target"));
     if (!IsTrackable(entity))
     {
         return 0;
     }
 
+    set_pev(entity, pev_classname, "hldm_comedy_rocket");
+    engfunc(EngFunc_SetModel, entity, "models/rpgrocket.mdl");
     set_pev(entity, pev_origin, origin);
     set_pev(entity, pev_owner, owner);
-    dllfunc(DLLFunc_Spawn, entity);
+    set_pev(entity, pev_movetype, MOVETYPE_FLY);
+    set_pev(entity, pev_solid, SOLID_BBOX);
+    set_pev(entity, pev_takedamage, DAMAGE_NO);
+    new Float:mins[3] = {-2.0, -2.0, -2.0};
+    new Float:maxs[3] = {2.0, 2.0, 2.0};
+    engfunc(EngFunc_SetSize, entity, mins, maxs);
     set_pev(entity, pev_velocity, velocity);
 
     g_customRocket[entity] = true;
@@ -590,6 +633,7 @@ stock ResetClient(id)
     g_previousButtons[id] = 0;
     g_secondRocketPending[id] = false;
     g_secondRocketTime[id] = 0.0;
+    g_lastRocketVolley[id] = -9999.0;
     g_gaussCorrectionPending[id] = false;
     g_gaussCorrectionTime[id] = 0.0;
 }

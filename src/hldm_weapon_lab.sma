@@ -7,7 +7,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Lab"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_PLAYERS 32
@@ -76,6 +76,7 @@ new g_pcvarHornetMax;
 new g_pcvarHornetLifetime;
 new g_pcvarHornetDamage;
 new g_pcvarHornetRadius;
+new g_pcvarManageHornets;
 new g_pcvarTripmineRadius;
 new g_pcvarGrenadeHornets;
 new g_pcvarRocketHornets;
@@ -139,6 +140,7 @@ public plugin_init()
     g_pcvarHornetLifetime = register_cvar("hldm_weaponlab_hornet_lifetime", "3.5");
     g_pcvarHornetDamage = register_cvar("hldm_weaponlab_hornet_damage", "40.0");
     g_pcvarHornetRadius = register_cvar("hldm_weaponlab_hornet_radius", "96.0");
+    g_pcvarManageHornets = register_cvar("hldm_weaponlab_manage_hornets", "0");
     g_pcvarTripmineRadius = register_cvar("hldm_weaponlab_tripmine_radius", "200.0");
     g_pcvarGrenadeHornets = register_cvar("hldm_weaponlab_grenade_hornets", "3");
     g_pcvarRocketHornets = register_cvar("hldm_weaponlab_rocket_hornets", "4");
@@ -428,7 +430,7 @@ public OnEntitySpawnPost(entity)
     new classname[32];
     pev(entity, pev_classname, classname, charsmax(classname));
 
-    if (equal(classname, "hornet"))
+    if (equal(classname, "hornet") && get_pcvar_num(g_pcvarManageHornets))
     {
         TagHornet(entity);
     }
@@ -486,7 +488,7 @@ public OnEntityTouch(entity, other)
     }
 
     new tag = pev(entity, pev_iuser3);
-    if (tag == TAG_HORNET)
+    if (tag == TAG_HORNET && get_pcvar_num(g_pcvarManageHornets))
     {
         new owner = GetTaggedOwner(entity);
         new Float:spawnTime;
@@ -543,7 +545,10 @@ public TaskEntityTick()
     }
 
     new Float:now = get_gametime();
-    ProcessHornets(now);
+    if (get_pcvar_num(g_pcvarManageHornets))
+    {
+        ProcessHornets(now);
+    }
     ProcessTripmines(now);
     ProcessGrenades(now);
     ProcessSnarks();
@@ -1041,7 +1046,10 @@ stock SpawnHornet(owner, const Float:origin[3], const Float:velocity[3])
     set_pev(entity, pev_owner, owner);
     dllfunc(DLLFunc_Spawn, entity);
     set_pev(entity, pev_velocity, velocity);
-    TagHornet(entity);
+    if (get_pcvar_num(g_pcvarManageHornets))
+    {
+        TagHornet(entity);
+    }
     return entity;
 }
 
