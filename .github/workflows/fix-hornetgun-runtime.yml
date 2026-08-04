@@ -1,0 +1,406 @@
+name: Fix Hornet Gun runtime
+
+on:
+  push:
+    branches: ["fix/hornetgun-runtime-v1.1"]
+    paths:
+      - "docs/HORNET_RUNTIME_FIX_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/hornetgun-runtime-v1.1
+
+      - name: Patch native Hornet Gun tracking and explosions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/hldm_weapon_lab.sma")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  '#define PLUGIN_VERSION "1.0.0"',
+                  '#define PLUGIN_VERSION "1.1.0"',
+              ),
+              (
+                  '    register_concmd("amx_quiet_status", "CmdQuietStatus", ADMIN_RCON, "- list silent punishment state");\n',
+                  '    register_concmd("amx_quiet_status", "CmdQuietStatus", ADMIN_RCON, "- list silent punishment state");\n'
+                  '    register_concmd("amx_weaponlab_hornets", "CmdHornetStatus", ADMIN_RCON, "- show active and tagged hornets");\n',
+              ),
+              (
+                  '    register_forward(FM_Touch, "OnEntityTouch", false);\n',
+                  '    register_forward(FM_Touch, "OnEntityTouch", false);\n'
+                  '    register_forward(FM_Think, "OnEntityThinkPre", false);\n',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"Required anchor missing: {old!r}")
+              text = text.replace(old, new, 1)
+
+          old = '''    if (equal(classname, "grenade") && containi(model, "grenade") >= 0)
+    {
+        if (pev(entity, pev_iuser3) != TAG_GRENADE)
+        {
+            TagEntity(entity, TAG_GRENADE, 0.0);
+        }
+    }
+
+    return FMRES_IGNORED;
+}
+
+public OnEntityTouch'''
+
+          new = '''    if (equal(classname, "hornet") || equali(model, "models/hornet.mdl"))
+    {
+        // Native Hornet Gun projectiles are most reliable here: the SDK has
+        // already assigned pev_owner before Spawn(), and SET_MODEL happens
+        // during CHornet::Spawn. FM_Spawn alone was not reliable on the
+        // current Steam listen-server path.
+        EnsureHornetTagged(entity);
+    }
+    else if (equal(classname, "grenade") && containi(model, "grenade") >= 0)
+    {
+        if (pev(entity, pev_iuser3) != TAG_GRENADE)
+        {
+            TagEntity(entity, TAG_GRENADE, 0.0);
+        }
+    }
+
+    return FMRES_IGNORED;
+}
+
+public OnEntityThinkPre(entity)
+{
+    if (!get_pcvar_num(g_pcvarEnabled) || !pev_valid(entity))
+    {
+        return FMRES_IGNORED;
+    }
+
+    new classname[24];
+    pev(entity, pev_classname, classname, charsmax(classname));
+    if (!equal(classname, "hornet"))
+    {
+        return FMRES_IGNORED;
+    }
+
+    EnsureHornetTagged(entity);
+
+    new Float:expireTime;
+    pev(entity, pev_fuser3, expireTime);
+    if (expireTime > 0.0 && get_gametime() >= expireTime)
+    {
+        ExplodeHornet(entity);
+        return FMRES_SUPERCEDE;
+    }
+
+    return FMRES_IGNORED;
+}
+
+public OnEntityTouch'''
+
+          if old not in text:
+              raise SystemExit("OnSetModelPost anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''public CmdQuietStatus(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    console_print(id, "[WEAPON LAB] quiet punishment state:");
+    for (new target = 1; target <= MaxClients; target++)
+    {
+        if (!is_user_connected(target) || !g_quietMask[target])
+        {
+            continue;
+        }
+
+        new name[32], authid[40];
+        get_user_name(target, name, charsmax(name));
+        get_user_authid(target, authid, charsmax(authid));
+        console_print(id, "  #%d %s <%s> mask=%d", get_user_userid(target), name, authid, g_quietMask[target]);
+    }
+
+    return PLUGIN_HANDLED;
+}
+
+public QuietTargetMenuHandler'''
+
+          new = '''public CmdQuietStatus(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    console_print(id, "[WEAPON LAB] quiet punishment state:");
+    for (new target = 1; target <= MaxClients; target++)
+    {
+        if (!is_user_connected(target) || !g_quietMask[target])
+        {
+            continue;
+        }
+
+        new name[32], authid[40];
+        get_user_name(target, name, charsmax(name));
+        get_user_authid(target, authid, charsmax(authid));
+        console_print(id, "  #%d %s <%s> mask=%d", get_user_userid(target), name, authid, g_quietMask[target]);
+    }
+
+    return PLUGIN_HANDLED;
+}
+
+public CmdHornetStatus(id, level, cid)
+{
+    if (!cmd_access(id, level, cid, 1))
+    {
+        return PLUGIN_HANDLED;
+    }
+
+    new total, tagged, untagged;
+    new perOwner[MAX_PLAYERS + 1];
+    new entity = -1;
+
+    while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "hornet")) > 0)
+    {
+        if (!pev_valid(entity))
+        {
+            continue;
+        }
+
+        total++;
+        if (pev(entity, pev_iuser3) == TAG_HORNET)
+        {
+            tagged++;
+            new owner = GetTaggedOwner(entity);
+            if (owner >= 1 && owner <= MaxClients)
+            {
+                perOwner[owner]++;
+            }
+        }
+        else
+        {
+            untagged++;
+        }
+    }
+
+    console_print(id, "[WEAPON LAB] hornets total=%d tagged=%d untagged=%d max=%d", total, tagged, untagged, ClampInt(get_pcvar_num(g_pcvarHornetMax), 1, 32));
+    for (new owner = 1; owner <= MaxClients; owner++)
+    {
+        if (!perOwner[owner])
+        {
+            continue;
+        }
+
+        new name[32];
+        get_user_name(owner, name, charsmax(name));
+        console_print(id, "  #%d %s active hornets=%d", get_user_userid(owner), name, perOwner[owner]);
+    }
+
+    return PLUGIN_HANDLED;
+}
+
+public QuietTargetMenuHandler'''
+
+          if old not in text:
+              raise SystemExit("CmdQuietStatus anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''stock ProcessHornets(Float:now)
+{
+    new entity = -1;
+    while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "hornet")) > 0)
+    {
+        if (!pev_valid(entity) || pev(entity, pev_iuser3) != TAG_HORNET)
+        {
+            continue;
+        }
+
+        new owner = GetTaggedOwner(entity);
+        new Float:expireTime;
+        pev(entity, pev_fuser3, expireTime);
+
+        if (expireTime > 0.0 && now >= expireTime)
+        {
+            ExplodeHornet(entity);
+            continue;
+        }
+
+        if (owner >= 1
+            && owner <= MaxClients
+            && is_user_alive(owner)
+            && (g_quietMask[owner] & QUIET_BETRAYAL))
+        {
+            SteerEntityToward(entity, owner, 720.0, 28.0);
+            set_pev(entity, pev_owner, 0);
+        }
+    }
+}
+'''
+
+          new = '''stock ProcessHornets(Float:now)
+{
+    new entity = -1;
+    while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "hornet")) > 0)
+    {
+        if (!pev_valid(entity))
+        {
+            continue;
+        }
+
+        // Late discovery is intentional. Native Hornet Gun projectiles were
+        // escaping the FM_Spawn-only tag path on the Steam listen server,
+        // while hornets created manually by Egon were tagged explicitly.
+        EnsureHornetTagged(entity);
+
+        if (!pev_valid(entity) || pev(entity, pev_iuser3) != TAG_HORNET)
+        {
+            continue;
+        }
+
+        new owner = GetTaggedOwner(entity);
+        new Float:expireTime;
+        pev(entity, pev_fuser3, expireTime);
+
+        // Fallback for a stock hornet whose own DieTouch already hid it before
+        // the metamod touch hook saw it. Convert that silent removal into the
+        // requested mini explosion.
+        if (pev(entity, pev_modelindex) == 0 || pev(entity, pev_solid) == SOLID_NOT)
+        {
+            ExplodeHornet(entity);
+            continue;
+        }
+
+        if (expireTime > 0.0 && now >= expireTime)
+        {
+            ExplodeHornet(entity);
+            continue;
+        }
+
+        if (owner >= 1
+            && owner <= MaxClients
+            && is_user_alive(owner)
+            && (g_quietMask[owner] & QUIET_BETRAYAL))
+        {
+            SteerEntityToward(entity, owner, 720.0, 28.0);
+            set_pev(entity, pev_owner, 0);
+        }
+    }
+}
+'''
+
+          if old not in text:
+              raise SystemExit("ProcessHornets anchor missing")
+          text = text.replace(old, new, 1)
+
+          old = '''stock TagHornet(entity)
+{
+    TagEntity(entity, TAG_HORNET, 0.0);
+
+    new Float:now = get_gametime();
+    set_pev(entity, pev_fuser2, now);
+    set_pev(entity, pev_fuser3, now + ClampFloat(get_pcvar_float(g_pcvarHornetLifetime), 0.4, 10.0));
+
+    EnforceHornetLimit(GetTaggedOwner(entity));
+}
+'''
+
+          new = '''stock EnsureHornetTagged(entity)
+{
+    if (!pev_valid(entity) || pev(entity, pev_iuser3) == TAG_HORNET)
+    {
+        return;
+    }
+
+    TagHornet(entity);
+}
+
+stock TagHornet(entity)
+{
+    if (!pev_valid(entity))
+    {
+        return;
+    }
+
+    new owner = pev(entity, pev_owner);
+    if (owner < 1 || owner > MaxClients || !is_user_connected(owner))
+    {
+        owner = InferHornetOwner(entity);
+    }
+
+    set_pev(entity, pev_iuser3, TAG_HORNET);
+    set_pev(entity, pev_iuser2, owner);
+
+    new Float:now = get_gametime();
+    set_pev(entity, pev_fuser2, now);
+    set_pev(entity, pev_fuser3, now + ClampFloat(get_pcvar_float(g_pcvarHornetLifetime), 0.4, 10.0));
+
+    EnforceHornetLimit(owner);
+}
+
+stock InferHornetOwner(entity)
+{
+    if (!pev_valid(entity))
+    {
+        return 0;
+    }
+
+    new Float:hornetOrigin[3];
+    pev(entity, pev_origin, hornetOrigin);
+
+    new bestPlayer;
+    new Float:bestDistanceSquared = 160.0 * 160.0;
+    for (new player = 1; player <= MaxClients; player++)
+    {
+        if (!is_user_alive(player) || get_user_weapon(player) != W_HORNETGUN)
+        {
+            continue;
+        }
+
+        new Float:playerOrigin[3];
+        pev(player, pev_origin, playerOrigin);
+        new Float:distanceSquared = VectorDistanceSquared(hornetOrigin, playerOrigin);
+        if (distanceSquared < bestDistanceSquared)
+        {
+            bestDistanceSquared = distanceSquared;
+            bestPlayer = player;
+        }
+    }
+
+    return bestPlayer;
+}
+'''
+
+          if old not in text:
+              raise SystemExit("TagHornet anchor missing")
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8", newline="\n")
+
+          cfg = Path("configs/plugins/hldm_weapon_lab.cfg")
+          cfg_text = cfg.read_text(encoding="utf-8")
+          cfg_text = cfg_text.replace("// HLDM Weapon Lab 1.0.0", "// HLDM Weapon Lab 1.1.0", 1)
+          cfg.write_text(cfg_text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_weapon_lab.sma configs/plugins/hldm_weapon_lab.cfg
+          git commit -m "Fix native Hornet Gun tagging, cap and explosions"
+          git push origin HEAD:fix/hornetgun-runtime-v1.1
