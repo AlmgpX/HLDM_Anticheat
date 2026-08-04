@@ -221,7 +221,8 @@ stock AdjustBots()
                 continue;
             }
 
-            server_cmd("kick #%d", get_user_userid(id));
+            new kickCommand[] = "kick";
+            server_cmd("%s #%d", kickCommand, get_user_userid(id));
             server_exec();
             return;
         }
