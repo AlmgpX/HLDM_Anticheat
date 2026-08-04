@@ -1,0 +1,1 @@
+Trigger main repair for Leader Curse v1.0.1.
