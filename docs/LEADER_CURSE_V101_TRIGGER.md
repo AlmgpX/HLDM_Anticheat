@@ -1,0 +1,1 @@
+Trigger Leader Curse v1.0.1 ammo-surprise repair.
