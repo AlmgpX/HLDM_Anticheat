@@ -1,0 +1,50 @@
+name: Fix Weapon Lab warnings
+
+on:
+  push:
+    branches: ["feature/weapon-lab-v1"]
+    paths:
+      - "docs/WEAPON_LAB_FIX_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/weapon-lab-v1
+
+      - name: Repair Pawn warnings
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/hldm_weapon_lab.sma")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = {
+              "    ProcessSnarks(now);\n": "    ProcessSnarks();\n",
+              "stock ProcessSnarks(Float:now)\n": "stock ProcessSnarks()\n",
+              "    message_begin(MSG_PVS, SVC_TEMPENTITY, origin);\n": "    engfunc(EngFunc_MessageBegin, MSG_PVS, SVC_TEMPENTITY, origin, 0);\n",
+          }
+
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f"Required source anchor not found: {old!r}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit repair
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_weapon_lab.sma
+          git commit -m "Fix Weapon Lab Pawn warnings"
+          git push origin HEAD:feature/weapon-lab-v1
