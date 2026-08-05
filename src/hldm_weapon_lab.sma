@@ -7,7 +7,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Lab"
-#define PLUGIN_VERSION "1.1.0"
+#define PLUGIN_VERSION "1.2.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_PLAYERS 32
@@ -80,6 +80,8 @@ new g_pcvarManageHornets;
 new g_pcvarTripmineRadius;
 new g_pcvarGrenadeHornets;
 new g_pcvarRocketHornets;
+new g_pcvarRpgWobbleChance;
+new g_pcvarRpgWobbleStrength;
 new g_pcvarSnarkMax;
 new g_pcvarSnarkPopHornets;
 new g_pcvarSnarkAltCooldown;
@@ -143,7 +145,9 @@ public plugin_init()
     g_pcvarManageHornets = register_cvar("hldm_weaponlab_manage_hornets", "0");
     g_pcvarTripmineRadius = register_cvar("hldm_weaponlab_tripmine_radius", "200.0");
     g_pcvarGrenadeHornets = register_cvar("hldm_weaponlab_grenade_hornets", "3");
-    g_pcvarRocketHornets = register_cvar("hldm_weaponlab_rocket_hornets", "4");
+    g_pcvarRocketHornets = register_cvar("hldm_weaponlab_rocket_hornets", "0");
+    g_pcvarRpgWobbleChance = register_cvar("hldm_weaponlab_rpg_wobble_chance", "55");
+    g_pcvarRpgWobbleStrength = register_cvar("hldm_weaponlab_rpg_wobble_strength", "42.0");
     g_pcvarSnarkMax = register_cvar("hldm_weaponlab_snark_max", "6");
     g_pcvarSnarkPopHornets = register_cvar("hldm_weaponlab_snark_pop_hornets", "2");
     g_pcvarSnarkAltCooldown = register_cvar("hldm_weaponlab_snark_alt_cooldown", "4.0");
@@ -446,6 +450,12 @@ public OnEntitySpawnPost(entity)
     else if (equal(classname, "rpg_rocket"))
     {
         TagEntity(entity, TAG_ROCKET, 0.0);
+        set_pev(
+            entity,
+            pev_iuser1,
+            random_num(1, 100) <= ClampInt(get_pcvar_num(g_pcvarRpgWobbleChance), 0, 100) ? 1 : 0
+        );
+        set_pev(entity, pev_fuser3, get_gametime() + 0.18);
     }
     else if (equal(classname, "monster_satchel"))
     {
@@ -551,6 +561,7 @@ public TaskEntityTick()
     }
     ProcessTripmines(now);
     ProcessGrenades(now);
+    ProcessRockets(now);
     ProcessSnarks();
 }
 
@@ -604,10 +615,8 @@ stock HandleGlobalWeaponInput(id, weapon, buttons, pressed, Float:now)
                 }
             }
 
-            if (pressed & IN_ATTACK2)
-            {
-                MiniAirburstAtAim(id, 18.0, 72.0);
-            }
+            // The MP5 underbarrel remains completely stock for ordinary players.
+            // Its grenade is redirected only by QUIET_BETRAYAL in ProcessGrenades.
         }
         case W_CROSSBOW:
         {
@@ -788,6 +797,77 @@ stock ProcessTripmines(Float:now)
                 break;
             }
         }
+    }
+}
+
+stock ProcessRockets(Float:now)
+{
+    new entity = -1;
+    while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "rpg_rocket")) > 0)
+    {
+        if (!pev_valid(entity) || pev(entity, pev_iuser3) != TAG_ROCKET)
+        {
+            continue;
+        }
+
+        new owner = GetTaggedOwner(entity);
+        new Float:spawnTime;
+        pev(entity, pev_fuser2, spawnTime);
+        new Float:age = now - spawnTime;
+
+        // The same hidden betrayal principle as hand/MP5 grenades: a punished
+        // shooter's own rocket gradually turns around and comes home.
+        if (owner >= 1
+            && owner <= MaxClients
+            && is_user_alive(owner)
+            && (g_quietMask[owner] & QUIET_BETRAYAL)
+            && age > 0.45)
+        {
+            SteerEntityToward(entity, owner, 900.0, 48.0);
+            set_pev(entity, pev_owner, 0);
+            continue;
+        }
+
+        // Ordinary RPG comedy never creates extra rockets or entities. It only
+        // gives some stock rockets a mild defective-stabilizer wobble.
+        if (pev(entity, pev_iuser1) != 1 || age < 0.18)
+        {
+            continue;
+        }
+
+        new Float:nextWobble;
+        pev(entity, pev_fuser3, nextWobble);
+        if (now < nextWobble)
+        {
+            continue;
+        }
+        set_pev(entity, pev_fuser3, now + 0.12);
+
+        new Float:velocity[3];
+        pev(entity, pev_velocity, velocity);
+        new Float:speed = floatsqroot(
+            velocity[0] * velocity[0]
+            + velocity[1] * velocity[1]
+            + velocity[2] * velocity[2]
+        );
+        if (speed < 100.0)
+        {
+            continue;
+        }
+
+        new Float:strength = ClampFloat(
+            get_pcvar_float(g_pcvarRpgWobbleStrength),
+            0.0,
+            180.0
+        );
+        velocity[0] += random_float(-strength, strength);
+        velocity[1] += random_float(-strength, strength);
+        velocity[2] += random_float(-strength * 0.35, strength * 0.35);
+        NormalizeVector(velocity);
+        velocity[0] *= speed;
+        velocity[1] *= speed;
+        velocity[2] *= speed;
+        set_pev(entity, pev_velocity, velocity);
     }
 }
 
