@@ -6,30 +6,18 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Comedy"
-#define PLUGIN_VERSION "2.1.0"
+#define PLUGIN_VERSION "2.2.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
-#define MAX_TRACKED 2048
 #define TASK_TICK 62001
 
 #define W_PYTHON 3
-#define W_MP5 4
+#define W_RPG 8
 #define W_GAUSS 9
 
-#define TE_EXPLOSION_CUSTOM 3
-
 new g_previousButtons[33];
-new bool:g_secondRocketPending[33];
-new Float:g_secondRocketTime[33];
-new Float:g_lastRocketVolley[33];
 new bool:g_gaussCorrectionPending[33];
 new Float:g_gaussCorrectionTime[33];
-
-new bool:g_customRocket[MAX_TRACKED + 1];
-new g_rocketOwner[MAX_TRACKED + 1];
-new Float:g_rocketSpawnTime[MAX_TRACKED + 1];
-
-new g_explosionSprite;
 
 new g_pcvarEnabled;
 new g_pcvarPythonSelfDamage;
@@ -37,14 +25,6 @@ new g_pcvarPythonBolts;
 new g_pcvarPythonSpread;
 new g_pcvarPythonBoltSpeed;
 new g_pcvarPythonRecoil;
-new g_pcvarRocketDelay;
-new g_pcvarRocketSpeed;
-new g_pcvarRocketTurn;
-new g_pcvarRocketSnarks;
-new g_pcvarRocketDamage;
-new g_pcvarRocketRadius;
-new g_pcvarRocketCooldown;
-new g_pcvarRocketMaxActive;
 new g_pcvarComedyChance;
 new g_pcvarGaussImpulse;
 
@@ -52,41 +32,34 @@ new const g_factoryLines[][] =
 {
     "MADE IN CHINA",
     "MADI EN INDIA",
-    "SELF-DESTRUCT VACUUM CLEANER: EXPORT MODEL",
-    "WARRANTY VALID UNTIL FIRST SHOT",
+    "RPG GUIDANCE PROVIDED BY CONFIDENCE",
+    "ROCKET STABILIZER INSTALLED SIDEWAYS",
+    "WARRANTY VALID UNTIL LAUNCH",
     "QUALITY CONTROL NOT INCLUDED",
     "ASSEMBLED FROM PREMIUM LEFTOVERS",
-    "FACTORY TEST RESULT: IT TURNED ON ONCE",
-    "RECOIL COMPENSATOR INSTALLED BACKWARDS",
-    "USER DAMAGE IS AN INTENDED FEATURE",
-    "THE BARREL HAS SELECTED SIXTEEN DIRECTIONS",
-    "FACTORY ZERO: SOMEWHERE IN FRONT OF YOU",
-    "MISSILE GUIDANCE PROVIDED BY CONFIDENCE",
-    "SECOND ROCKET ADDED AFTER CUSTOMER COMPLAINTS",
-    "SAFE LAUNCH DISTANCE WAS NOT TRANSLATED",
+    "FACTORY TEST RESULT: IT LEFT THE TUBE",
+    "TARGETING COMPUTER TRANSLATED THROUGH SIX LANGUAGES",
+    "SAFE DISTANCE WAS SOLD SEPARATELY",
+    "EXPORT MODEL: DOMESTIC SAFETY REMOVED",
     "ENGINEERED TO PASS INSPECTION, NOT COMBAT",
     "THE WARRANTY EXPLODED FIRST",
-    "THIS FAILURE IS WITHIN FACTORY TOLERANCE",
-    "PREMIUM SELF-DISASSEMBLY FEATURE ACTIVATED",
+    "THIS TRAJECTORY IS WITHIN FACTORY TOLERANCE",
+    "PREMIUM SELF-CORRECTION FEATURE ACTIVATED",
     "ASSEMBLED WITH CONFIDENCE, NOT MEASUREMENTS",
-    "THE MANUAL WAS TRANSLATED THROUGH SIX LANGUAGES"
+    "USER MANUAL PRINTED AFTER PRODUCTION ENDED",
+    "FACTORY ZERO: SOMEWHERE IN FRONT OF YOU"
 };
 
 public plugin_precache()
 {
-    g_explosionSprite = precache_model("sprites/zerogxplode.spr");
     precache_model("models/crossbow_bolt.mdl");
-    precache_model("models/rpgrocket.mdl");
-    precache_model("models/w_squeak.mdl");
-    precache_sound("weapons/rocketfire1.wav");
-    precache_sound("weapons/explode3.wav");
 }
 
 public plugin_init()
 {
     register_plugin(PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_AUTHOR);
 
-    register_concmd("amx_weaponcomedy_status", "CmdStatus", ADMIN_RCON, "- show custom rocket state");
+    register_concmd("amx_weaponcomedy_status", "CmdStatus", ADMIN_RCON, "- show Weapon Comedy state");
 
     g_pcvarEnabled = register_cvar("hldm_weaponcomedy_enabled", "1");
     g_pcvarPythonSelfDamage = register_cvar("hldm_weaponcomedy_python_self_damage", "5.0");
@@ -94,21 +67,12 @@ public plugin_init()
     g_pcvarPythonSpread = register_cvar("hldm_weaponcomedy_python_spread", "0.19");
     g_pcvarPythonBoltSpeed = register_cvar("hldm_weaponcomedy_python_bolt_speed", "1500.0");
     g_pcvarPythonRecoil = register_cvar("hldm_weaponcomedy_python_recoil", "260.0");
-    g_pcvarRocketDelay = register_cvar("hldm_weaponcomedy_second_rocket_delay", "0.30");
-    g_pcvarRocketSpeed = register_cvar("hldm_weaponcomedy_rocket_speed", "720.0");
-    g_pcvarRocketTurn = register_cvar("hldm_weaponcomedy_rocket_turn", "0.28");
-    g_pcvarRocketSnarks = register_cvar("hldm_weaponcomedy_rocket_snarks", "3");
-    g_pcvarRocketDamage = register_cvar("hldm_weaponcomedy_rocket_damage", "95.0");
-    g_pcvarRocketRadius = register_cvar("hldm_weaponcomedy_rocket_radius", "180.0");
-    g_pcvarRocketCooldown = register_cvar("hldm_weaponcomedy_rocket_cooldown", "1.25");
-    g_pcvarRocketMaxActive = register_cvar("hldm_weaponcomedy_rocket_max_active", "4");
     g_pcvarComedyChance = register_cvar("hldm_weaponcomedy_text_chance", "38");
     g_pcvarGaussImpulse = register_cvar("hldm_weaponcomedy_gauss_impulse", "290.0");
 
     AutoExecConfig(true, "hldm_weapon_comedy");
 
     register_forward(FM_CmdStart, "OnCmdStart", false);
-    register_forward(FM_Touch, "OnTouchPre", false);
     set_task(0.05, "TaskTick", TASK_TICK, _, _, "b");
 }
 
@@ -129,9 +93,8 @@ public OnCmdStart(id, userCmd, randomSeed)
         return FMRES_IGNORED;
     }
 
-    new rawButtons = get_uc(userCmd, UC_Buttons);
-    new buttons = rawButtons;
-    new pressed = rawButtons & ~g_previousButtons[id];
+    new buttons = get_uc(userCmd, UC_Buttons);
+    new pressed = buttons & ~g_previousButtons[id];
     new weapon = get_user_weapon(id);
     new Float:now = get_gametime();
 
@@ -139,24 +102,9 @@ public OnCmdStart(id, userCmd, randomSeed)
     {
         FirePythonScatter(id);
     }
-    else if (weapon == W_MP5 && (pressed & IN_ATTACK2))
+    else if (weapon == W_RPG && (pressed & IN_ATTACK))
     {
-        // Suppress the stock grenade exactly once, but remember the original
-        // button state. The previous code stored the cleared bit, so holding
-        // attack2 looked like a fresh press every frame and created a rocket storm.
-        buttons &= ~IN_ATTACK2;
-        set_uc(userCmd, UC_Buttons, buttons);
-
-        new Float:cooldown = ClampFloat(get_pcvar_float(g_pcvarRocketCooldown), 0.35, 5.0);
-        if (now - g_lastRocketVolley[id] >= cooldown
-  && CountOwnerRockets(id) < ClampInt(get_pcvar_num(g_pcvarRocketMaxActive), 1, 12))
-        {
-  g_lastRocketVolley[id] = now;
-  SpawnHomingRocket(id, -10.0);
-  g_secondRocketPending[id] = true;
-  g_secondRocketTime[id] = now + ClampFloat(get_pcvar_float(g_pcvarRocketDelay), 0.10, 1.5);
-  ShowFactoryLine(id);
-        }
+        ShowFactoryLine(id);
     }
     else if (weapon == W_GAUSS && (pressed & IN_ATTACK2))
     {
@@ -165,25 +113,8 @@ public OnCmdStart(id, userCmd, randomSeed)
         ShowFactoryLine(id);
     }
 
-    g_previousButtons[id] = rawButtons;
+    g_previousButtons[id] = buttons;
     return FMRES_IGNORED;
-}
-
-public OnTouchPre(entity, other)
-{
-    if (!get_pcvar_num(g_pcvarEnabled) || !IsTrackable(entity) || !g_customRocket[entity])
-    {
-        return FMRES_IGNORED;
-    }
-
-    new owner = g_rocketOwner[entity];
-    if (other == owner && get_gametime() - g_rocketSpawnTime[entity] < 0.55)
-    {
-        return FMRES_SUPERCEDE;
-    }
-
-    ExplodeRocket(entity);
-    return FMRES_SUPERCEDE;
 }
 
 public TaskTick()
@@ -194,29 +125,19 @@ public TaskTick()
     }
 
     new Float:now = get_gametime();
-
     for (new id = 1; id <= MaxClients; id++)
     {
-        if (g_secondRocketPending[id] && now >= g_secondRocketTime[id])
+        if (!g_gaussCorrectionPending[id] || now < g_gaussCorrectionTime[id])
         {
-            g_secondRocketPending[id] = false;
-            if (is_user_alive(id))
-            {
-                SpawnHomingRocket(id, 14.0);
-            }
+            continue;
         }
 
-        if (g_gaussCorrectionPending[id] && now >= g_gaussCorrectionTime[id])
+        g_gaussCorrectionPending[id] = false;
+        if (is_user_alive(id))
         {
-            g_gaussCorrectionPending[id] = false;
-            if (is_user_alive(id))
-            {
-                ApplyGaussCorrection(id);
-            }
+            ApplyGaussCorrection(id);
         }
     }
-
-    ProcessRockets();
 }
 
 public CmdStatus(id, level, cid)
@@ -226,16 +147,7 @@ public CmdStatus(id, level, cid)
         return PLUGIN_HANDLED;
     }
 
-    new count;
-    for (new entity = MaxClients + 1; entity <= MAX_TRACKED; entity++)
-    {
-        if (g_customRocket[entity] && pev_valid(entity))
-        {
-            count++;
-        }
-    }
-
-    console_print(id, "[WEAPON COMEDY] active custom rockets=%d", count);
+    console_print(id, "[WEAPON COMEDY] MP5 underbarrel untouched; Python/Gauss/RPG comedy enabled.");
     return PLUGIN_HANDLED;
 }
 
@@ -266,7 +178,7 @@ stock SpawnScatterBolt(owner)
     }
 
     new Float:origin[3], Float:viewOffset[3], Float:angles[3];
-    new Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3];
+    new Float:forwardVector[3], Float:rightVector[3], Float:upVector[3], Float:velocity[3];
 
     pev(owner, pev_origin, origin);
     pev(owner, pev_view_ofs, viewOffset);
@@ -275,15 +187,15 @@ stock SpawnScatterBolt(owner)
     origin[1] += viewOffset[1];
     origin[2] += viewOffset[2];
 
-    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, rightVector, upVector);
     origin[0] += forwardVector[0] * 24.0;
     origin[1] += forwardVector[1] * 24.0;
     origin[2] += forwardVector[2] * 24.0;
 
     new Float:spread = ClampFloat(get_pcvar_float(g_pcvarPythonSpread), 0.01, 0.75);
-    velocity[0] = forwardVector[0] + right[0] * random_float(-spread, spread) + up[0] * random_float(-spread, spread);
-    velocity[1] = forwardVector[1] + right[1] * random_float(-spread, spread) + up[1] * random_float(-spread, spread);
-    velocity[2] = forwardVector[2] + right[2] * random_float(-spread, spread) + up[2] * random_float(-spread, spread);
+    velocity[0] = forwardVector[0] + rightVector[0] * random_float(-spread, spread) + upVector[0] * random_float(-spread, spread);
+    velocity[1] = forwardVector[1] + rightVector[1] * random_float(-spread, spread) + upVector[1] * random_float(-spread, spread);
+    velocity[2] = forwardVector[2] + rightVector[2] * random_float(-spread, spread) + upVector[2] * random_float(-spread, spread);
     NormalizeVector(velocity);
 
     new Float:speed = ClampFloat(get_pcvar_float(g_pcvarPythonBoltSpeed), 500.0, 2600.0);
@@ -306,11 +218,13 @@ stock SpawnScatterBolt(owner)
 
 stock ApplyPythonRecoil(id)
 {
-    new Float:angles[3], Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3], Float:punch[3];
+    new Float:angles[3], Float:forwardVector[3], Float:rightVector[3], Float:upVector[3];
+    new Float:velocity[3], Float:punch[3];
+
     pev(id, pev_v_angle, angles);
     pev(id, pev_velocity, velocity);
     pev(id, pev_punchangle, punch);
-    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, rightVector, upVector);
 
     new Float:recoil = ClampFloat(get_pcvar_float(g_pcvarPythonRecoil), 0.0, 800.0);
     velocity[0] -= forwardVector[0] * recoil;
@@ -324,218 +238,11 @@ stock ApplyPythonRecoil(id)
     set_pev(id, pev_punchangle, punch);
 }
 
-stock CountOwnerRockets(owner)
-{
-    new count;
-    for (new entity = MaxClients + 1; entity <= MAX_TRACKED; entity++)
-    {
-        if (g_customRocket[entity] && pev_valid(entity) && g_rocketOwner[entity] == owner)
-        {
-  count++;
-        }
-    }
-    return count;
-}
-
-stock SpawnHomingRocket(owner, Float:sideOffset)
-{
-    if (!is_user_alive(owner))
-    {
-        return 0;
-    }
-
-    new Float:origin[3], Float:viewOffset[3], Float:angles[3];
-    new Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3];
-    pev(owner, pev_origin, origin);
-    pev(owner, pev_view_ofs, viewOffset);
-    pev(owner, pev_v_angle, angles);
-    origin[0] += viewOffset[0];
-    origin[1] += viewOffset[1];
-    origin[2] += viewOffset[2];
-
-    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
-    origin[0] += forwardVector[0] * 58.0 + right[0] * sideOffset;
-    origin[1] += forwardVector[1] * 58.0 + right[1] * sideOffset;
-    origin[2] += forwardVector[2] * 58.0 + 4.0;
-
-    new Float:speed = ClampFloat(get_pcvar_float(g_pcvarRocketSpeed), 300.0, 1600.0);
-    velocity[0] = forwardVector[0] * speed;
-    velocity[1] = forwardVector[1] * speed;
-    velocity[2] = forwardVector[2] * speed;
-
-    if (CountOwnerRockets(owner) >= ClampInt(get_pcvar_num(g_pcvarRocketMaxActive), 1, 12))
-    {
-        return 0;
-    }
-
-    // Use a private info_target instead of the native rpg_rocket class.
-    // The native class was simultaneously handled by Weapon Lab and the game DLL,
-    // producing duplicate touch/explosion paths and entity storms.
-    new entity = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "info_target"));
-    if (!IsTrackable(entity))
-    {
-        return 0;
-    }
-
-    set_pev(entity, pev_classname, "hldm_comedy_rocket");
-    engfunc(EngFunc_SetModel, entity, "models/rpgrocket.mdl");
-    set_pev(entity, pev_origin, origin);
-    set_pev(entity, pev_owner, owner);
-    set_pev(entity, pev_movetype, MOVETYPE_FLY);
-    set_pev(entity, pev_solid, SOLID_BBOX);
-    set_pev(entity, pev_takedamage, DAMAGE_NO);
-    new Float:mins[3] = {-2.0, -2.0, -2.0};
-    new Float:maxs[3] = {2.0, 2.0, 2.0};
-    engfunc(EngFunc_SetSize, entity, mins, maxs);
-    set_pev(entity, pev_velocity, velocity);
-
-    g_customRocket[entity] = true;
-    g_rocketOwner[entity] = owner;
-    g_rocketSpawnTime[entity] = get_gametime();
-
-    engfunc(EngFunc_EmitSound, entity, CHAN_WEAPON, "weapons/rocketfire1.wav", 0.8, ATTN_NORM, 0, PITCH_NORM);
-    return entity;
-}
-
-stock ProcessRockets()
-{
-    new Float:turn = ClampFloat(get_pcvar_float(g_pcvarRocketTurn), 0.02, 0.95);
-    new Float:speed = ClampFloat(get_pcvar_float(g_pcvarRocketSpeed), 300.0, 1600.0);
-
-    for (new entity = MaxClients + 1; entity <= MAX_TRACKED; entity++)
-    {
-        if (!g_customRocket[entity])
-        {
-            continue;
-        }
-
-        if (!pev_valid(entity))
-        {
-            ResetRocket(entity);
-            continue;
-        }
-
-        if (get_gametime() - g_rocketSpawnTime[entity] > 8.0)
-        {
-            ExplodeRocket(entity);
-            continue;
-        }
-
-        new target = FindNearestTarget(entity, g_rocketOwner[entity]);
-        if (!target)
-        {
-            continue;
-        }
-
-        new Float:origin[3], Float:targetOrigin[3], Float:desired[3], Float:current[3];
-        pev(entity, pev_origin, origin);
-        pev(target, pev_origin, targetOrigin);
-        targetOrigin[2] += 30.0;
-
-        desired[0] = targetOrigin[0] - origin[0];
-        desired[1] = targetOrigin[1] - origin[1];
-        desired[2] = targetOrigin[2] - origin[2];
-        if (!NormalizeVector(desired))
-        {
-            continue;
-        }
-
-        pev(entity, pev_velocity, current);
-        NormalizeVector(current);
-        current[0] = current[0] * (1.0 - turn) + desired[0] * turn;
-        current[1] = current[1] * (1.0 - turn) + desired[1] * turn;
-        current[2] = current[2] * (1.0 - turn) + desired[2] * turn;
-        NormalizeVector(current);
-
-        current[0] *= speed;
-        current[1] *= speed;
-        current[2] *= speed;
-        set_pev(entity, pev_velocity, current);
-    }
-}
-
-stock FindNearestTarget(entity, owner)
-{
-    new Float:origin[3];
-    pev(entity, pev_origin, origin);
-
-    new best;
-    new Float:bestDistance = 4096.0 * 4096.0;
-    for (new target = 1; target <= MaxClients; target++)
-    {
-        if (!is_user_alive(target) || target == owner)
-        {
-            continue;
-        }
-
-        new Float:targetOrigin[3];
-        pev(target, pev_origin, targetOrigin);
-        new Float:distance = DistanceSquared(origin, targetOrigin);
-        if (distance < bestDistance)
-        {
-            bestDistance = distance;
-            best = target;
-        }
-    }
-
-    return best;
-}
-
-stock ExplodeRocket(entity)
-{
-    if (!IsTrackable(entity) || !g_customRocket[entity])
-    {
-        return;
-    }
-
-    new owner = g_rocketOwner[entity];
-    new attacker = owner >= 1 && owner <= MaxClients && is_user_connected(owner) ? owner : entity;
-    new Float:origin[3];
-    pev(entity, pev_origin, origin);
-
-    VisualExplosion(origin, 9);
-    RadiusDamage(entity, attacker, origin, ClampFloat(get_pcvar_float(g_pcvarRocketDamage), 0.0, 300.0), ClampFloat(get_pcvar_float(g_pcvarRocketRadius), 32.0, 512.0));
-    SpawnSnarkBurst(owner, origin, ClampInt(get_pcvar_num(g_pcvarRocketSnarks), 0, 8));
-    engfunc(EngFunc_EmitSound, entity, CHAN_BODY, "weapons/explode3.wav", 0.85, ATTN_NORM, 0, 105);
-
-    ResetRocket(entity);
-    if (pev_valid(entity))
-    {
-        engfunc(EngFunc_RemoveEntity, entity);
-    }
-}
-
-stock SpawnSnarkBurst(owner, const Float:origin[3], count)
-{
-    for (new index = 0; index < count; index++)
-    {
-        new Float:spawnOrigin[3], Float:velocity[3];
-        spawnOrigin[0] = origin[0] + random_float(-18.0, 18.0);
-        spawnOrigin[1] = origin[1] + random_float(-18.0, 18.0);
-        spawnOrigin[2] = origin[2] + random_float(12.0, 28.0);
-
-        velocity[0] = random_float(-240.0, 240.0);
-        velocity[1] = random_float(-240.0, 240.0);
-        velocity[2] = random_float(220.0, 380.0);
-
-        new snark = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "monster_snark"));
-        if (!pev_valid(snark))
-        {
-            continue;
-        }
-
-        set_pev(snark, pev_origin, spawnOrigin);
-        set_pev(snark, pev_owner, owner);
-        dllfunc(DLLFunc_Spawn, snark);
-        set_pev(snark, pev_velocity, velocity);
-    }
-}
-
 stock ApplyGaussCorrection(id)
 {
-    new Float:angles[3], Float:forwardVector[3], Float:right[3], Float:up[3], Float:velocity[3];
+    new Float:angles[3], Float:forwardVector[3], Float:rightVector[3], Float:upVector[3], Float:velocity[3];
     pev(id, pev_v_angle, angles);
-    engfunc(EngFunc_AngleVectors, angles, forwardVector, right, up);
+    engfunc(EngFunc_AngleVectors, angles, forwardVector, rightVector, upVector);
 
     new Float:impulse = ClampFloat(get_pcvar_float(g_pcvarGaussImpulse), 80.0, 900.0);
     if (random_num(0, 2) == 0)
@@ -547,8 +254,8 @@ stock ApplyGaussCorrection(id)
     else
     {
         new Float:direction = random_num(0, 1) ? 1.0 : -1.0;
-        velocity[0] = right[0] * impulse * direction + random_float(-50.0, 50.0);
-        velocity[1] = right[1] * impulse * direction + random_float(-50.0, 50.0);
+        velocity[0] = rightVector[0] * impulse * direction + random_float(-50.0, 50.0);
+        velocity[1] = rightVector[1] * impulse * direction + random_float(-50.0, 50.0);
         velocity[2] = random_float(-120.0, 80.0);
     }
 
@@ -557,7 +264,8 @@ stock ApplyGaussCorrection(id)
 
 stock ShowFactoryLine(id)
 {
-    if (!is_user_connected(id) || random_num(1, 100) > ClampInt(get_pcvar_num(g_pcvarComedyChance), 0, 100))
+    if (!is_user_connected(id)
+        || random_num(1, 100) > ClampInt(get_pcvar_num(g_pcvarComedyChance), 0, 100))
     {
         return;
     }
@@ -570,70 +278,9 @@ stock ShowFactoryLine(id)
     }
 }
 
-stock RadiusDamage(inflictor, attacker, const Float:origin[3], Float:maximumDamage, Float:radius)
-{
-    for (new target = 1; target <= MaxClients; target++)
-    {
-        if (!is_user_alive(target))
-        {
-            continue;
-        }
-
-        new Float:targetOrigin[3];
-        pev(target, pev_origin, targetOrigin);
-        new Float:distance = floatsqroot(DistanceSquared(origin, targetOrigin));
-        if (distance > radius)
-        {
-            continue;
-        }
-
-        new Float:damage = maximumDamage * (1.0 - distance / radius);
-        if (damage < 1.0)
-        {
-            damage = 1.0;
-        }
-
-        ExecuteHamB(Ham_TakeDamage, target, inflictor, attacker, damage, DMG_BLAST);
-    }
-}
-
-stock VisualExplosion(const Float:origin[3], scale)
-{
-    engfunc(EngFunc_MessageBegin, MSG_PVS, SVC_TEMPENTITY, origin, 0);
-    write_byte(TE_EXPLOSION_CUSTOM);
-    engfunc(EngFunc_WriteCoord, origin[0]);
-    engfunc(EngFunc_WriteCoord, origin[1]);
-    engfunc(EngFunc_WriteCoord, origin[2]);
-    write_short(g_explosionSprite);
-    write_byte(ClampInt(scale, 1, 20));
-    write_byte(15);
-    write_byte(0);
-    message_end();
-}
-
-stock bool:IsTrackable(entity)
-{
-    return bool:(entity > MaxClients && entity <= MAX_TRACKED && pev_valid(entity));
-}
-
-stock ResetRocket(entity)
-{
-    if (entity < 1 || entity > MAX_TRACKED)
-    {
-        return;
-    }
-
-    g_customRocket[entity] = false;
-    g_rocketOwner[entity] = 0;
-    g_rocketSpawnTime[entity] = 0.0;
-}
-
 stock ResetClient(id)
 {
     g_previousButtons[id] = 0;
-    g_secondRocketPending[id] = false;
-    g_secondRocketTime[id] = 0.0;
-    g_lastRocketVolley[id] = -9999.0;
     g_gaussCorrectionPending[id] = false;
     g_gaussCorrectionTime[id] = 0.0;
 }
@@ -650,14 +297,6 @@ stock bool:NormalizeVector(Float:vector[3])
     vector[1] /= length;
     vector[2] /= length;
     return true;
-}
-
-stock Float:DistanceSquared(const Float:left[3], const Float:right[3])
-{
-    new Float:x = left[0] - right[0];
-    new Float:y = left[1] - right[1];
-    new Float:z = left[2] - right[2];
-    return x * x + y * y + z * z;
 }
 
 stock ClampInt(value, minimumValue, maximumValue)
