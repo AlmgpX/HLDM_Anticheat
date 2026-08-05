@@ -6,7 +6,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Comedy"
-#define PLUGIN_VERSION "2.2.0"
+#define PLUGIN_VERSION "2.3.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define TASK_TICK 62001
@@ -15,15 +15,20 @@
 #define W_RPG 8
 #define W_GAUSS 9
 
+#define TE_TRACER_CUSTOM 6
+#define TE_SPARKS_CUSTOM 9
+
 new g_previousButtons[33];
 new bool:g_gaussCorrectionPending[33];
 new Float:g_gaussCorrectionTime[33];
 
 new g_pcvarEnabled;
 new g_pcvarPythonSelfDamage;
-new g_pcvarPythonBolts;
+new g_pcvarPythonSelfDamageLethal;
+new g_pcvarPythonPellets;
+new g_pcvarPythonPelletDamage;
 new g_pcvarPythonSpread;
-new g_pcvarPythonBoltSpeed;
+new g_pcvarPythonRange;
 new g_pcvarPythonRecoil;
 new g_pcvarComedyChance;
 new g_pcvarGaussImpulse;
@@ -50,11 +55,6 @@ new const g_factoryLines[][] =
     "FACTORY ZERO: SOMEWHERE IN FRONT OF YOU"
 };
 
-public plugin_precache()
-{
-    precache_model("models/crossbow_bolt.mdl");
-}
-
 public plugin_init()
 {
     register_plugin(PLUGIN_NAME, PLUGIN_VERSION, PLUGIN_AUTHOR);
@@ -62,11 +62,13 @@ public plugin_init()
     register_concmd("amx_weaponcomedy_status", "CmdStatus", ADMIN_RCON, "- show Weapon Comedy state");
 
     g_pcvarEnabled = register_cvar("hldm_weaponcomedy_enabled", "1");
-    g_pcvarPythonSelfDamage = register_cvar("hldm_weaponcomedy_python_self_damage", "5.0");
-    g_pcvarPythonBolts = register_cvar("hldm_weaponcomedy_python_bolts", "16");
-    g_pcvarPythonSpread = register_cvar("hldm_weaponcomedy_python_spread", "0.19");
-    g_pcvarPythonBoltSpeed = register_cvar("hldm_weaponcomedy_python_bolt_speed", "1500.0");
-    g_pcvarPythonRecoil = register_cvar("hldm_weaponcomedy_python_recoil", "260.0");
+    g_pcvarPythonSelfDamage = register_cvar("hldm_weaponcomedy_python_self_damage", "4.0");
+    g_pcvarPythonSelfDamageLethal = register_cvar("hldm_weaponcomedy_python_self_damage_lethal", "0");
+    g_pcvarPythonPellets = register_cvar("hldm_weaponcomedy_python_pellets", "16");
+    g_pcvarPythonPelletDamage = register_cvar("hldm_weaponcomedy_python_pellet_damage", "3.0");
+    g_pcvarPythonSpread = register_cvar("hldm_weaponcomedy_python_spread", "0.16");
+    g_pcvarPythonRange = register_cvar("hldm_weaponcomedy_python_range", "4096.0");
+    g_pcvarPythonRecoil = register_cvar("hldm_weaponcomedy_python_recoil", "220.0");
     g_pcvarComedyChance = register_cvar("hldm_weaponcomedy_text_chance", "38");
     g_pcvarGaussImpulse = register_cvar("hldm_weaponcomedy_gauss_impulse", "290.0");
 
@@ -147,73 +149,141 @@ public CmdStatus(id, level, cid)
         return PLUGIN_HANDLED;
     }
 
-    console_print(id, "[WEAPON COMEDY] MP5 underbarrel untouched; Python/Gauss/RPG comedy enabled.");
+    console_print(
+        id,
+        "[WEAPON COMEDY] Python pellets=%d damage=%.1f zero-entity=1; MP5 untouched; RPG/Gauss enabled.",
+        ClampInt(get_pcvar_num(g_pcvarPythonPellets), 1, 32),
+        get_pcvar_float(g_pcvarPythonPelletDamage)
+    );
     return PLUGIN_HANDLED;
 }
 
 stock FirePythonScatter(id)
 {
-    new Float:selfDamage = ClampFloat(get_pcvar_float(g_pcvarPythonSelfDamage), 0.0, 100.0);
-    if (selfDamage > 0.0)
-    {
-        ExecuteHamB(Ham_TakeDamage, id, id, id, selfDamage, DMG_BULLET);
-    }
-
+    ApplyPythonSelfDamage(id);
     ApplyPythonRecoil(id);
 
-    new count = ClampInt(get_pcvar_num(g_pcvarPythonBolts), 1, 32);
+    new count = ClampInt(get_pcvar_num(g_pcvarPythonPellets), 1, 32);
     for (new index = 0; index < count; index++)
     {
-        SpawnScatterBolt(id);
+        FirePythonPellet(id);
     }
 
     ShowFactoryLine(id);
 }
 
-stock SpawnScatterBolt(owner)
+stock ApplyPythonSelfDamage(id)
+{
+    new Float:damage = ClampFloat(get_pcvar_float(g_pcvarPythonSelfDamage), 0.0, 100.0);
+    if (damage <= 0.0 || !is_user_alive(id))
+    {
+        return;
+    }
+
+    if (!get_pcvar_num(g_pcvarPythonSelfDamageLethal))
+    {
+        new Float:health;
+        pev(id, pev_health, health);
+        new Float:maximumSafeDamage = health - 1.0;
+        if (maximumSafeDamage <= 0.0)
+        {
+            return;
+        }
+        if (damage > maximumSafeDamage)
+        {
+            damage = maximumSafeDamage;
+        }
+    }
+
+    ExecuteHamB(Ham_TakeDamage, id, id, id, damage, DMG_BULLET);
+}
+
+stock FirePythonPellet(owner)
 {
     if (!is_user_alive(owner))
     {
-        return 0;
+        return;
     }
 
-    new Float:origin[3], Float:viewOffset[3], Float:angles[3];
-    new Float:forwardVector[3], Float:rightVector[3], Float:upVector[3], Float:velocity[3];
+    new Float:start[3], Float:viewOffset[3], Float:angles[3];
+    new Float:forwardVector[3], Float:rightVector[3], Float:upVector[3];
+    new Float:direction[3], Float:end[3], Float:impact[3];
 
-    pev(owner, pev_origin, origin);
+    pev(owner, pev_origin, start);
     pev(owner, pev_view_ofs, viewOffset);
     pev(owner, pev_v_angle, angles);
-    origin[0] += viewOffset[0];
-    origin[1] += viewOffset[1];
-    origin[2] += viewOffset[2];
+    start[0] += viewOffset[0];
+    start[1] += viewOffset[1];
+    start[2] += viewOffset[2];
 
     engfunc(EngFunc_AngleVectors, angles, forwardVector, rightVector, upVector);
-    origin[0] += forwardVector[0] * 24.0;
-    origin[1] += forwardVector[1] * 24.0;
-    origin[2] += forwardVector[2] * 24.0;
 
     new Float:spread = ClampFloat(get_pcvar_float(g_pcvarPythonSpread), 0.01, 0.75);
-    velocity[0] = forwardVector[0] + rightVector[0] * random_float(-spread, spread) + upVector[0] * random_float(-spread, spread);
-    velocity[1] = forwardVector[1] + rightVector[1] * random_float(-spread, spread) + upVector[1] * random_float(-spread, spread);
-    velocity[2] = forwardVector[2] + rightVector[2] * random_float(-spread, spread) + upVector[2] * random_float(-spread, spread);
-    NormalizeVector(velocity);
+    direction[0] = forwardVector[0]
+        + rightVector[0] * random_float(-spread, spread)
+        + upVector[0] * random_float(-spread, spread);
+    direction[1] = forwardVector[1]
+        + rightVector[1] * random_float(-spread, spread)
+        + upVector[1] * random_float(-spread, spread);
+    direction[2] = forwardVector[2]
+        + rightVector[2] * random_float(-spread, spread)
+        + upVector[2] * random_float(-spread, spread);
 
-    new Float:speed = ClampFloat(get_pcvar_float(g_pcvarPythonBoltSpeed), 500.0, 2600.0);
-    velocity[0] *= speed;
-    velocity[1] *= speed;
-    velocity[2] *= speed;
-
-    new entity = engfunc(EngFunc_CreateNamedEntity, engfunc(EngFunc_AllocString, "crossbow_bolt"));
-    if (!pev_valid(entity))
+    if (!NormalizeVector(direction))
     {
-        return 0;
+        return;
     }
 
-    set_pev(entity, pev_origin, origin);
-    set_pev(entity, pev_owner, owner);
-    dllfunc(DLLFunc_Spawn, entity);
-    set_pev(entity, pev_velocity, velocity);
-    return entity;
+    new Float:range = ClampFloat(get_pcvar_float(g_pcvarPythonRange), 512.0, 8192.0);
+    end[0] = start[0] + direction[0] * range;
+    end[1] = start[1] + direction[1] * range;
+    end[2] = start[2] + direction[2] * range;
+
+    new trace = create_tr2();
+    engfunc(EngFunc_TraceLine, start, end, DONT_IGNORE_MONSTERS, owner, trace);
+
+    new hit = get_tr2(trace, TR_pHit);
+    get_tr2(trace, TR_vecEndPos, impact);
+
+    DrawPythonTracer(start, impact);
+
+    if (hit > 0 && pev_valid(hit) && pev(hit, pev_takedamage) != DAMAGE_NO)
+    {
+        new Float:damage = ClampFloat(get_pcvar_float(g_pcvarPythonPelletDamage), 0.0, 25.0);
+        if (damage > 0.0)
+        {
+            ExecuteHamB(Ham_TakeDamage, hit, owner, owner, damage, DMG_BULLET);
+        }
+    }
+    else
+    {
+        DrawImpactSparks(impact);
+    }
+
+    free_tr2(trace);
+}
+
+stock DrawPythonTracer(const Float:start[3], const Float:end[3])
+{
+    engfunc(EngFunc_MessageBegin, MSG_PVS, SVC_TEMPENTITY, start, 0);
+    write_byte(TE_TRACER_CUSTOM);
+    engfunc(EngFunc_WriteCoord, start[0]);
+    engfunc(EngFunc_WriteCoord, start[1]);
+    engfunc(EngFunc_WriteCoord, start[2]);
+    engfunc(EngFunc_WriteCoord, end[0]);
+    engfunc(EngFunc_WriteCoord, end[1]);
+    engfunc(EngFunc_WriteCoord, end[2]);
+    message_end();
+}
+
+stock DrawImpactSparks(const Float:origin[3])
+{
+    engfunc(EngFunc_MessageBegin, MSG_PVS, SVC_TEMPENTITY, origin, 0);
+    write_byte(TE_SPARKS_CUSTOM);
+    engfunc(EngFunc_WriteCoord, origin[0]);
+    engfunc(EngFunc_WriteCoord, origin[1]);
+    engfunc(EngFunc_WriteCoord, origin[2]);
+    message_end();
 }
 
 stock ApplyPythonRecoil(id)
@@ -229,12 +299,12 @@ stock ApplyPythonRecoil(id)
     new Float:recoil = ClampFloat(get_pcvar_float(g_pcvarPythonRecoil), 0.0, 800.0);
     velocity[0] -= forwardVector[0] * recoil;
     velocity[1] -= forwardVector[1] * recoil;
-    velocity[2] += 75.0;
+    velocity[2] += 60.0;
     set_pev(id, pev_velocity, velocity);
 
-    punch[0] -= random_float(7.0, 13.0);
-    punch[1] += random_float(-5.0, 5.0);
-    punch[2] += random_float(-2.0, 2.0);
+    punch[0] -= random_float(6.0, 10.0);
+    punch[1] += random_float(-4.0, 4.0);
+    punch[2] += random_float(-1.5, 1.5);
     set_pev(id, pev_punchangle, punch);
 }
 
