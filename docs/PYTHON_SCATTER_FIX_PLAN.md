@@ -1,0 +1,1 @@
+Root cause: Weapon Comedy spawned sixteen native crossbow_bolt entities per Python shot. Weapon Payloads treats every crossbow bolt impact as an explosive event and queues three snarks, so one revolver shot could create sixteen explosions and forty-eight snarks. Replace the native entities with zero-entity hitscan pellet traces.
