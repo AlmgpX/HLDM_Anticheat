@@ -6,7 +6,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Payloads"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_PLAYERS 32
@@ -21,6 +21,7 @@
 #define TE_EXPLOSION_CUSTOM 3
 
 new bool:g_grenadeScheduled[MAX_EDICTS + 1];
+new bool:g_handGrenade[MAX_EDICTS + 1];
 new bool:g_boltScheduled[MAX_EDICTS + 1];
 
 new bool:g_incubatingSnark[MAX_EDICTS + 1];
@@ -72,7 +73,7 @@ public plugin_init()
     g_pcvarSatchelReleaseDelay = register_cvar("hldm_payload_satchel_release_delay", "0.85");
     g_pcvarSatchelDetectRadius = register_cvar("hldm_payload_satchel_detect_radius", "96.0");
 
-    // Hand/MP5 grenade payload.
+    // Hand grenade payload only. MP5 contact grenades remain stock.
     g_pcvarGrenadeHornets = register_cvar("hldm_payload_grenade_hornets", "5");
     g_pcvarGrenadeSpawnDelay = register_cvar("hldm_payload_grenade_spawn_delay", "0.14");
     g_pcvarHornetSpeed = register_cvar("hldm_payload_hornet_speed", "720.0");
@@ -139,6 +140,7 @@ public OnSetModelPost(entity, const model[])
     else if (containi(model, "grenade") >= 0)
     {
         g_grenadeScheduled[entity] = false;
+        g_handGrenade[entity] = containi(model, "w_grenade.mdl") >= 0;
     }
 
     return FMRES_IGNORED;
@@ -181,7 +183,7 @@ public OnEntityThinkPre(entity)
     new classname[32];
     pev(entity, pev_classname, classname, charsmax(classname));
 
-    if (equal(classname, "grenade"))
+    if (equal(classname, "grenade") && g_handGrenade[entity])
     {
         ScheduleGrenadePayload(entity, now);
     }
@@ -694,6 +696,7 @@ stock CleanupDeadTracking()
         }
 
         g_grenadeScheduled[entity] = false;
+        g_handGrenade[entity] = false;
         g_boltScheduled[entity] = false;
         g_incubatingSnark[entity] = false;
         g_snarkReleaseTime[entity] = 0.0;
