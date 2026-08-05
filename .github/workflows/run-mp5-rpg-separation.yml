@@ -1,0 +1,301 @@
+name: Run MP5 and RPG separation patch
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "docs/MP5_RPG_SEPARATION_TRIGGER.md"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/mp5-rpg-separation
+
+      - name: Patch Weapon Lab and Payloads
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              if old not in text:
+                  raise SystemExit(f"Missing anchor: {label}")
+              return text.replace(old, new, 1)
+
+          # ---------------- Weapon Lab ----------------
+          path = Path("src/hldm_weapon_lab.sma")
+          text = path.read_text(encoding="utf-8")
+
+          text = replace_once(text, '#define PLUGIN_VERSION "1.1.0"', '#define PLUGIN_VERSION "1.2.0"', 'Weapon Lab version')
+          text = replace_once(
+              text,
+              'new g_pcvarRocketHornets;\n',
+              'new g_pcvarRocketHornets;\n'
+              'new g_pcvarRocketSnarks;\n'
+              'new g_pcvarRpgWobbleChance;\n'
+              'new g_pcvarRpgWobbleStrength;\n',
+              'RPG cvar declarations',
+          )
+          text = replace_once(
+              text,
+              '    g_pcvarRocketHornets = register_cvar("hldm_weaponlab_rocket_hornets", "4");\n',
+              '    g_pcvarRocketHornets = register_cvar("hldm_weaponlab_rocket_hornets", "0");\n'
+              '    g_pcvarRocketSnarks = register_cvar("hldm_weaponlab_rpg_snarks", "2");\n'
+              '    g_pcvarRpgWobbleChance = register_cvar("hldm_weaponlab_rpg_wobble_chance", "55");\n'
+              '    g_pcvarRpgWobbleStrength = register_cvar("hldm_weaponlab_rpg_wobble_strength", "42.0");\n',
+              'RPG cvar registration',
+          )
+
+          text = replace_once(
+              text,
+              '''    else if (equal(classname, "rpg_rocket"))
+    {
+        TagEntity(entity, TAG_ROCKET, 0.0);
+    }
+''',
+              '''    else if (equal(classname, "rpg_rocket"))
+    {
+        TagEntity(entity, TAG_ROCKET, 0.0);
+        set_pev(entity, pev_iuser1, random_num(1, 100) <= ClampInt(get_pcvar_num(g_pcvarRpgWobbleChance), 0, 100) ? 1 : 0);
+        set_pev(entity, pev_fuser3, get_gametime() + 0.18);
+    }
+''',
+              'RPG spawn tagging',
+          )
+
+          text = replace_once(
+              text,
+              '''    if (tag == TAG_ROCKET)
+    {
+        new marker = pev(entity, pev_iuser4);
+        if (!marker)
+        {
+            set_pev(entity, pev_iuser4, 1);
+            new owner = GetTaggedOwner(entity);
+            new Float:origin[3];
+            pev(entity, pev_origin, origin);
+            VisualExplosion(origin, 6);
+            SpawnHornetBurst(owner, origin, ClampInt(get_pcvar_num(g_pcvarRocketHornets), 0, 10));
+        }
+    }
+''',
+              '''    if (tag == TAG_ROCKET)
+    {
+        new owner = GetTaggedOwner(entity);
+        new Float:spawnTime;
+        pev(entity, pev_fuser2, spawnTime);
+
+        if (other == owner && get_gametime() - spawnTime < 0.35)
+        {
+            return FMRES_IGNORED;
+        }
+
+        new marker = pev(entity, pev_iuser4);
+        if (!marker)
+        {
+            set_pev(entity, pev_iuser4, 1);
+            new Float:origin[3];
+            pev(entity, pev_origin, origin);
+            VisualExplosion(origin, 6);
+            SpawnSnarkBurst(owner, origin, ClampInt(get_pcvar_num(g_pcvarRocketSnarks), 0, 6));
+        }
+    }
+''',
+              'RPG touch payload',
+          )
+
+          text = replace_once(
+              text,
+              '    ProcessGrenades(now);\n',
+              '    ProcessGrenades(now);\n    ProcessRockets(now);\n',
+              'RPG tick call',
+          )
+
+          text = replace_once(
+              text,
+              '''
+            if (pressed & IN_ATTACK2)
+            {
+                MiniAirburstAtAim(id, 18.0, 72.0);
+            }
+''',
+              '''
+            // MP5 underbarrel is intentionally untouched for ordinary players.
+            // Quiet betrayal is applied later to its grenade entity only when
+            // this shooter is under the hidden punishment mode.
+''',
+              'remove MP5 underbarrel mutation',
+          )
+
+          process_anchor = 'stock ProcessGrenades(Float:now)\n'
+          process_rockets = '''stock ProcessRockets(Float:now)
+{
+    new entity = -1;
+    while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "rpg_rocket")) > 0)
+    {
+        if (!pev_valid(entity) || pev(entity, pev_iuser3) != TAG_ROCKET)
+        {
+            continue;
+        }
+
+        new owner = GetTaggedOwner(entity);
+        new Float:spawnTime;
+        pev(entity, pev_fuser2, spawnTime);
+        new Float:age = now - spawnTime;
+
+        if (owner >= 1
+            && owner <= MaxClients
+            && is_user_alive(owner)
+            && (g_quietMask[owner] & QUIET_BETRAYAL)
+            && age > 0.45)
+        {
+            SteerEntityToward(entity, owner, 900.0, 48.0);
+            set_pev(entity, pev_owner, 0);
+            continue;
+        }
+
+        if (pev(entity, pev_iuser1) != 1 || age < 0.18)
+        {
+            continue;
+        }
+
+        new Float:nextWobble;
+        pev(entity, pev_fuser3, nextWobble);
+        if (now < nextWobble)
+        {
+            continue;
+        }
+        set_pev(entity, pev_fuser3, now + 0.12);
+
+        new Float:velocity[3];
+        pev(entity, pev_velocity, velocity);
+        new Float:speed = floatsqroot(velocity[0] * velocity[0] + velocity[1] * velocity[1] + velocity[2] * velocity[2]);
+        if (speed < 100.0)
+        {
+            continue;
+        }
+
+        new Float:strength = ClampFloat(get_pcvar_float(g_pcvarRpgWobbleStrength), 0.0, 180.0);
+        velocity[0] += random_float(-strength, strength);
+        velocity[1] += random_float(-strength, strength);
+        velocity[2] += random_float(-strength * 0.35, strength * 0.35);
+        NormalizeVector(velocity);
+        velocity[0] *= speed;
+        velocity[1] *= speed;
+        velocity[2] *= speed;
+        set_pev(entity, pev_velocity, velocity);
+    }
+}
+
+'''
+          text = replace_once(text, process_anchor, process_rockets + process_anchor, 'insert ProcessRockets')
+
+          spawn_anchor = 'stock SpawnAlphaSnark(owner)\n'
+          snark_burst = '''stock SpawnSnarkBurst(owner, const Float:origin[3], count)
+{
+    for (new index = 0; index < count; index++)
+    {
+        new Float:spawnOrigin[3], Float:velocity[3];
+        spawnOrigin[0] = origin[0] + random_float(-16.0, 16.0);
+        spawnOrigin[1] = origin[1] + random_float(-16.0, 16.0);
+        spawnOrigin[2] = origin[2] + random_float(12.0, 26.0);
+
+        velocity[0] = random_float(-220.0, 220.0);
+        velocity[1] = random_float(-220.0, 220.0);
+        velocity[2] = random_float(220.0, 360.0);
+        SpawnSnark(owner, spawnOrigin, velocity);
+    }
+}
+
+'''
+          text = replace_once(text, spawn_anchor, snark_burst + spawn_anchor, 'insert RPG snark burst')
+
+          path.write_text(text, encoding="utf-8", newline="\n")
+
+          cfg = Path("configs/plugins/hldm_weapon_lab.cfg")
+          cfg_text = cfg.read_text(encoding="utf-8")
+          cfg_text = cfg_text.replace('// HLDM Weapon Lab 1.1.0', '// HLDM Weapon Lab 1.2.0', 1)
+          cfg_text = replace_once(
+              cfg_text,
+              'hldm_weaponlab_rocket_hornets "0"\n',
+              'hldm_weaponlab_rocket_hornets "0"\n\n'
+              '// MP5 underbarrel stays stock. Both hand grenades and MP5 contact\n'
+              '// grenades return to a shooter only under QUIET_BETRAYAL.\n'
+              '// RPG rockets get safe single-entity comedy: wobble and snarks on impact.\n'
+              'hldm_weaponlab_rpg_snarks "2"\n'
+              'hldm_weaponlab_rpg_wobble_chance "55"\n'
+              'hldm_weaponlab_rpg_wobble_strength "42.0"\n',
+              'Weapon Lab RPG config',
+          )
+          cfg.write_text(cfg_text, encoding="utf-8", newline="\n")
+
+          # ---------------- Weapon Payloads ----------------
+          path = Path("src/hldm_weapon_payloads.sma")
+          text = path.read_text(encoding="utf-8")
+          text = replace_once(text, '#define PLUGIN_VERSION "1.0.0"', '#define PLUGIN_VERSION "1.1.0"', 'Payloads version')
+          text = replace_once(
+              text,
+              'new bool:g_grenadeScheduled[MAX_EDICTS + 1];\n',
+              'new bool:g_grenadeScheduled[MAX_EDICTS + 1];\nnew bool:g_handGrenade[MAX_EDICTS + 1];\n',
+              'hand grenade marker',
+          )
+          text = replace_once(
+              text,
+              '    // Hand/MP5 grenade payload.\n',
+              '    // Hand grenade payload only. MP5 contact grenades remain stock.\n',
+              'payload comment',
+          )
+          text = replace_once(
+              text,
+              '''    else if (containi(model, "grenade") >= 0)
+    {
+        g_grenadeScheduled[entity] = false;
+    }
+''',
+              '''    else if (containi(model, "grenade") >= 0)
+    {
+        g_grenadeScheduled[entity] = false;
+        g_handGrenade[entity] = containi(model, "w_grenade.mdl") >= 0;
+    }
+''',
+              'grenade model classification',
+          )
+          text = replace_once(
+              text,
+              '    if (equal(classname, "grenade"))\n    {\n        ScheduleGrenadePayload(entity, now);\n    }\n',
+              '    if (equal(classname, "grenade") && g_handGrenade[entity])\n    {\n        ScheduleGrenadePayload(entity, now);\n    }\n',
+              'hand grenade payload gate',
+          )
+          text = replace_once(
+              text,
+              '        g_grenadeScheduled[entity] = false;\n',
+              '        g_grenadeScheduled[entity] = false;\n        g_handGrenade[entity] = false;\n',
+              'hand grenade cleanup',
+          )
+          path.write_text(text, encoding="utf-8", newline="\n")
+
+          cfg = Path("configs/plugins/hldm_weapon_payloads.cfg")
+          cfg_text = cfg.read_text(encoding="utf-8")
+          cfg_text = cfg_text.replace('// HLDM Weapon Payloads 1.0.0', '// HLDM Weapon Payloads 1.1.0', 1)
+          cfg_text = cfg_text.replace(
+              '// Grenade explosion payload: guided hornets appear after the native blast.',
+              '// Hand-grenade payload only. MP5 underbarrel contact grenades stay stock.',
+              1,
+          )
+          cfg.write_text(cfg_text, encoding="utf-8", newline="\n")
+          PY
+
+      - name: Commit patched sources
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/hldm_weapon_lab.sma src/hldm_weapon_payloads.sma configs/plugins/hldm_weapon_lab.cfg configs/plugins/hldm_weapon_payloads.cfg
+          git commit -m "Keep MP5 underbarrel stock and move comedy to RPG"
+          git push origin HEAD:fix/mp5-rpg-separation
