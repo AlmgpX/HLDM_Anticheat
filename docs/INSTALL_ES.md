@@ -2,6 +2,8 @@
 
 [Русский](INSTALL_RU.md) | [English](INSTALL_EN.md) | **Español**
 
+Comportamiento runtime objetivo: [BEHAVIOR_CONTRACT_ES.md](BEHAVIOR_CONTRACT_ES.md).
+
 Esta guía describe el **stack completo actual**, no solamente la configuración antigua `hldm_trap` + `hldm_detector`.
 
 ## 1. Elegir listen server de Steam o HLDS independiente
@@ -189,6 +191,7 @@ Valores seguros actuales:
 ```cfg
 hldm_weaponcomedy_python_self_damage "4.0"
 hldm_weaponcomedy_python_self_damage_lethal "0"
+hldm_weaponcomedy_python_suppress_stock_pvp_damage "1"
 hldm_weaponcomedy_python_pellets "16"
 hldm_weaponcomedy_python_pellet_damage "3.0"
 hldm_weaponcomedy_python_spread "0.16"

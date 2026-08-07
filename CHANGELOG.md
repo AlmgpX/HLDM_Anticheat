@@ -1,5 +1,15 @@
 # Changelog
 
+## Runtime behavior alignment - 2026-08-08
+
+- Python exact native PvP damage is suppressed while the stock shot still provides ammo, sound and animation; the 16-trace scatter is now the actual PvP damage pattern.
+- Python and Gauss duplicate backward recoil were removed from Weapon Lab; Weapon Comedy is the single recoil owner for both.
+- Python, RPG and Gauss factory messages are split into separate weapon-specific banks. Egon vacuum text remains isolated in `hldm_egon_factory`.
+- Legacy Weapon Lab grenade/RPG hornet touch payload paths were removed; delayed hand-grenade hornets remain owned by `hldm_weapon_payloads`.
+- The configured snark cap of 30 is now actually allowed by the internal clamp.
+- Hornet Policy now marks tracked hornets so reused GoldSrc edict slots do not inherit stale owner/lifetime state.
+- Added Russian, English and Spanish runtime behavior contracts and synchronized installation documentation.
+
 ## 1.0.0 - 2026-08-03
 
 ### Автоматическое обнаружение

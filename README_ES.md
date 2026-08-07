@@ -35,13 +35,15 @@ Después de varias lecciones muy visuales impartidas por GoldSrc, el proyecto si
 5. Python/revólver ya no crea 16 entidades nativas `crossbow_bolt`. Usa 16 trazadores hitscan sin entidad persistente, evitando que un disparo se convierta en 16 explosiones y 48 snarks.
 6. `monster_zombie` / `monster_headcrab` nativos no se pueden crear de forma segura con `DLLFunc_Spawn` tardío después de cargar el mapa: la game DLL intenta precachear sonidos y puede provocar `Host_Error`. Por eso el spawn runtime de monstruos está desactivado.
 7. Las llamadas automáticas `addbot` permanecen desactivadas hasta instalar un bot-DLL real compatible con ParaBot que proporcione ese comando.
+8. El recoil de Python y Gauss tiene un solo propietario: `hldm_weapon_comedy`; Weapon Lab no debe añadir un segundo impulso.
+9. `hldm_weaponlab_snark_max "30"` permite realmente 30 snarks y ya no queda limitado internamente a 24.
 
 ## Comportamiento actual de armas
 
 ### Hornet Gun
 
 - máximo 10 hornets activos por propietario;
-- el 11.º no hace explotar al más antiguo;
+- el 11.º se elimina inmediatamente y no hace explotar al más antiguo;
 - tocar el mundo no tiene por qué matar al hornet: puede continuar/rebotar;
 - golpear un objetivo vivo provoca una mini explosión;
 - los hornets supervivientes explotan por temporizador antes del borrado silencioso stock de GoldSrc;
@@ -49,14 +51,16 @@ Después de varias lecciones muy visuales impartidas por GoldSrc, el proyecto si
 
 ### Python / revólver
 
-Comportamiento actual de `Weapon Comedy 2.3.0`:
+Comportamiento actual de `Weapon Comedy 2.4.0`:
 
-- 16 trazadores hitscan visuales con dispersión tipo escopeta;
+- el disparo nativo de Python se conserva para munición, sonido y animación;
+- el **daño PvP exacto nativo se suprime**, por lo que la bala central stock no queda como segundo canal oculto de daño;
+- el patrón PvP real lo producen 16 trazas hitscan visuales con dispersión tipo escopeta;
 - el revólver no crea entidades nativas `crossbow_bolt`;
-- daño por pellet configurable;
-- retroceso físico/visual;
-- pequeño daño al propietario, no letal por defecto;
-- la ballesta real sigue siendo un arma separada y conserva su propio payload.
+- cada traza hace 3 de daño por defecto;
+- el recoil y el self-damage pertenecen solo a Weapon Comedy;
+- Weapon Lab ya no añade un segundo impulso de recoil a Python;
+- la ballesta real sigue separada y conserva su propio payload.
 
 ### Lanzagranadas del MP5
 
@@ -75,7 +79,13 @@ Se usa el cohete stock normal. No se crean cohetes adicionales.
 
 - algunos cohetes reciben una ligera oscilación de “estabilizador defectuoso”;
 - el cohete de un jugador con `QUIET_BETRAYAL` puede girar de vuelta hacia su propietario;
-- pueden aparecer frases de fábrica como `MADE IN CHINA`, `MADI EN INDIA`, `RPG GUIDANCE PROVIDED BY CONFIDENCE`.
+- las frases `MADE IN CHINA`, `MADI EN INDIA`, `RPG GUIDANCE PROVIDED BY CONFIDENCE` proceden solo del banco RPG/cohete.
+
+### Gauss
+
+- Weapon Lab ya no añade su antiguo recoil separado hacia atrás;
+- el recoil secundario pertenece a Weapon Comedy y termina bruscamente hacia abajo o hacia un lado aleatorio;
+- los mensajes proceden solo del banco Gauss/magnético, nunca del RPG o Egon.
 
 ### Egon
 
@@ -231,6 +241,7 @@ Invalid entity
 
 ## Documentación
 
+- [Contrato de comportamiento runtime](docs/BEHAVIOR_CONTRACT_ES.md)
 - [Instalación en ruso](docs/INSTALL_RU.md)
 - [Installation in English](docs/INSTALL_EN.md)
 - [Instalación en español](docs/INSTALL_ES.md)

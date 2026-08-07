@@ -2,6 +2,8 @@
 
 [Русский](INSTALL_RU.md) | [English](INSTALL_EN.md) | [Español](INSTALL_ES.md)
 
+Целевое поведение: [BEHAVIOR_CONTRACT_RU.md](BEHAVIOR_CONTRACT_RU.md).
+
 Эта инструкция описывает **текущий полный стек**, а не только ранние `hldm_trap` + `hldm_detector`.
 
 ## 1. Что выбрать: listen server или отдельный HLDS
@@ -191,6 +193,7 @@ rocket_speed
 ```cfg
 hldm_weaponcomedy_python_self_damage "4.0"
 hldm_weaponcomedy_python_self_damage_lethal "0"
+hldm_weaponcomedy_python_suppress_stock_pvp_damage "1"
 hldm_weaponcomedy_python_pellets "16"
 hldm_weaponcomedy_python_pellet_damage "3.0"
 hldm_weaponcomedy_python_spread "0.16"

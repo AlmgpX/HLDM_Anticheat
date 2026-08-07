@@ -35,13 +35,15 @@ After several very educational encounters with GoldSrc, the project follows stri
 5. Python/revolver no longer creates 16 native `crossbow_bolt` entities. It uses 16 zero-entity hitscan tracers, preventing one shot from turning into 16 explosions and 48 snarks.
 6. Native `monster_zombie` / `monster_headcrab` cannot be safely created with late `DLLFunc_Spawn` after map load because the game DLL attempts sound precaching and may trigger `Host_Error`. Runtime monster spawning is therefore disabled.
 7. Automatic `addbot` calls remain disabled until a real ParaBot-compatible bot DLL providing that command is installed.
+8. Python and Gauss recoil have one owner: `hldm_weapon_comedy`; Weapon Lab must not add a second impulse.
+9. `hldm_weaponlab_snark_max "30"` now really allows 30 snarks instead of being internally clamped to 24.
 
 ## Current weapon behavior
 
 ### Hornet Gun
 
 - maximum 10 active hornets per owner;
-- the 11th does not explode the oldest hornet;
+- the 11th is immediately removed and does not explode the oldest hornet;
 - world contact does not have to kill a hornet; the policy can let it continue/bounce;
 - hitting a live target causes a mini explosion;
 - surviving hornets explode on a timer before GoldSrc performs its stock silent cleanup;
@@ -49,14 +51,16 @@ After several very educational encounters with GoldSrc, the project follows stri
 
 ### Python / revolver
 
-Current `Weapon Comedy 2.3.0` behavior:
+Current `Weapon Comedy 2.4.0` behavior:
 
-- 16 visual hitscan tracers with shotgun-like spread;
+- the native Python shot remains for ammo consumption, sound and animation;
+- exact native **PvP damage is suppressed**, so the center stock bullet is not a hidden second damage channel;
+- the actual PvP pattern is produced by 16 visual hitscan traces with shotgun-like spread;
 - no native `crossbow_bolt` entities are created by the revolver;
-- configurable pellet damage;
-- physical/visual recoil;
-- small owner self-damage, non-lethal by default;
-- the real crossbow remains a separate weapon and keeps its own payload behavior.
+- each trace deals 3 damage by default;
+- physical/visual recoil and owner self-damage belong only to Weapon Comedy;
+- Weapon Lab no longer adds a second Python recoil impulse;
+- the real crossbow remains separate and keeps its own payload behavior.
 
 ### MP5 underbarrel
 
@@ -75,7 +79,13 @@ The normal stock rocket is used. No extra rockets are created.
 
 - some rockets receive a mild defective-stabilizer wobble;
 - a `QUIET_BETRAYAL` player's rocket may turn back toward its owner;
-- factory lines such as `MADE IN CHINA`, `MADI EN INDIA`, `RPG GUIDANCE PROVIDED BY CONFIDENCE` can appear as a comedy layer.
+- factory lines such as `MADE IN CHINA`, `MADI EN INDIA`, `RPG GUIDANCE PROVIDED BY CONFIDENCE` come only from the RPG/rocket message bank.
+
+### Gauss
+
+- Weapon Lab no longer adds its old separate backward recoil impulse;
+- secondary recoil belongs to Weapon Comedy and resolves sharply downward or toward a random side;
+- messages come only from the Gauss/magnetic bank, never from RPG or Egon.
 
 ### Egon
 
@@ -231,6 +241,7 @@ Invalid entity
 
 ## Documentation
 
+- [Runtime behavior contract](docs/BEHAVIOR_CONTRACT_EN.md)
 - [Russian installation](docs/INSTALL_RU.md)
 - [English installation](docs/INSTALL_EN.md)
 - [Spanish installation](docs/INSTALL_ES.md)
