@@ -6,13 +6,14 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Hornet Policy"
-#define PLUGIN_VERSION "2.1.0"
+#define PLUGIN_VERSION "2.2.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_TRACKED 2048
 #define W_HORNETGUN 11
 #define TE_EXPLOSION_CUSTOM 3
 #define TASK_SWEEP 61001
+#define POLICY_MARKER 61021
 
 new bool:g_tracked[MAX_TRACKED + 1];
 new bool:g_exploding[MAX_TRACKED + 1];
@@ -232,9 +233,21 @@ public CmdStatus(id, level, cid)
 
 stock TrackHornet(entity)
 {
-    if (!IsTrackable(entity) || g_tracked[entity])
+    if (!IsTrackable(entity))
     {
         return;
+    }
+
+    if (g_tracked[entity] && pev(entity, pev_iuser4) == POLICY_MARKER)
+    {
+        return;
+    }
+
+    // GoldSrc can reuse an edict index after a native entity disappears.
+    // If that slot belonged to an older hornet, clear the cached ownership/time.
+    if (g_tracked[entity])
+    {
+        ResetEntity(entity);
     }
 
     new owner = pev(entity, pev_owner);
@@ -257,6 +270,7 @@ stock TrackHornet(entity)
 
     g_tracked[entity] = true;
     g_exploding[entity] = false;
+    set_pev(entity, pev_iuser4, POLICY_MARKER);
     g_owner[entity] = owner;
     g_spawnTime[entity] = get_gametime();
     g_expireTime[entity] = g_spawnTime[entity] + ClampFloat(get_pcvar_float(g_pcvarLifetime), 0.5, 15.0);
@@ -270,7 +284,10 @@ stock CountOwnerHornets(owner)
 
     while ((entity = engfunc(EngFunc_FindEntityByString, entity, "classname", "hornet")) > 0)
     {
-        if (IsTrackable(entity) && g_tracked[entity] && g_owner[entity] == owner)
+        if (IsTrackable(entity)
+            && g_tracked[entity]
+            && pev(entity, pev_iuser4) == POLICY_MARKER
+            && g_owner[entity] == owner)
         {
             count++;
         }
