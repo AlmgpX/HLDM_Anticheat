@@ -7,7 +7,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Lab"
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.3.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define MAX_PLAYERS 32
@@ -78,8 +78,6 @@ new g_pcvarHornetDamage;
 new g_pcvarHornetRadius;
 new g_pcvarManageHornets;
 new g_pcvarTripmineRadius;
-new g_pcvarGrenadeHornets;
-new g_pcvarRocketHornets;
 new g_pcvarRpgWobbleChance;
 new g_pcvarRpgWobbleStrength;
 new g_pcvarSnarkMax;
@@ -144,11 +142,9 @@ public plugin_init()
     g_pcvarHornetRadius = register_cvar("hldm_weaponlab_hornet_radius", "96.0");
     g_pcvarManageHornets = register_cvar("hldm_weaponlab_manage_hornets", "0");
     g_pcvarTripmineRadius = register_cvar("hldm_weaponlab_tripmine_radius", "200.0");
-    g_pcvarGrenadeHornets = register_cvar("hldm_weaponlab_grenade_hornets", "3");
-    g_pcvarRocketHornets = register_cvar("hldm_weaponlab_rocket_hornets", "0");
     g_pcvarRpgWobbleChance = register_cvar("hldm_weaponlab_rpg_wobble_chance", "55");
     g_pcvarRpgWobbleStrength = register_cvar("hldm_weaponlab_rpg_wobble_strength", "42.0");
-    g_pcvarSnarkMax = register_cvar("hldm_weaponlab_snark_max", "6");
+    g_pcvarSnarkMax = register_cvar("hldm_weaponlab_snark_max", "30");
     g_pcvarSnarkPopHornets = register_cvar("hldm_weaponlab_snark_pop_hornets", "2");
     g_pcvarSnarkAltCooldown = register_cvar("hldm_weaponlab_snark_alt_cooldown", "4.0");
     g_pcvarCrossbowSuicide = register_cvar("hldm_weaponlab_crossbow_alt_suicide", "1");
@@ -513,20 +509,6 @@ public OnEntityTouch(entity, other)
         return FMRES_SUPERCEDE;
     }
 
-    if (tag == TAG_ROCKET)
-    {
-        new marker = pev(entity, pev_iuser4);
-        if (!marker)
-        {
-            set_pev(entity, pev_iuser4, 1);
-            new owner = GetTaggedOwner(entity);
-            new Float:origin[3];
-            pev(entity, pev_origin, origin);
-            VisualExplosion(origin, 6);
-            SpawnHornetBurst(owner, origin, ClampInt(get_pcvar_num(g_pcvarRocketHornets), 0, 10));
-        }
-    }
-
     return FMRES_IGNORED;
 }
 
@@ -596,13 +578,6 @@ stock HandleGlobalWeaponInput(id, weapon, buttons, pressed, Float:now)
                 }
             }
         }
-        case W_PYTHON:
-        {
-            if (pressed & IN_ATTACK)
-            {
-                ApplyBackRecoil(id, 210.0, 55.0);
-            }
-        }
         case W_MP5:
         {
             if (pressed & IN_ATTACK)
@@ -634,13 +609,6 @@ stock HandleGlobalWeaponInput(id, weapon, buttons, pressed, Float:now)
             else if (pressed & IN_ATTACK)
             {
                 ApplyBackRecoil(id, 170.0, 45.0);
-            }
-        }
-        case W_GAUSS:
-        {
-            if (pressed & IN_ATTACK2)
-            {
-                ApplyBackRecoil(id, 460.0, 240.0);
             }
         }
         case W_EGON:
@@ -893,16 +861,6 @@ stock ProcessGrenades(Float:now)
         {
             SteerEntityToward(entity, owner, 620.0, 30.0);
         }
-
-        new Float:damageTime;
-        pev(entity, pev_dmgtime, damageTime);
-        if (damageTime > 0.0 && now >= damageTime - 0.18 && !pev(entity, pev_iuser4))
-        {
-            set_pev(entity, pev_iuser4, 1);
-            new Float:origin[3];
-            pev(entity, pev_origin, origin);
-            SpawnHornetBurst(owner, origin, ClampInt(get_pcvar_num(g_pcvarGrenadeHornets), 0, 10));
-        }
     }
 }
 
@@ -1016,7 +974,7 @@ stock EnforceSnarkLimit(owner)
         return;
     }
 
-    new maximum = ClampInt(get_pcvar_num(g_pcvarSnarkMax), 1, 24);
+    new maximum = ClampInt(get_pcvar_num(g_pcvarSnarkMax), 1, 64);
     new count;
     new oldest;
     new Float:oldestTime = 999999999.0;

@@ -6,7 +6,7 @@
 #pragma semicolon 1
 
 #define PLUGIN_NAME    "HLDM Weapon Comedy"
-#define PLUGIN_VERSION "2.3.0"
+#define PLUGIN_VERSION "2.4.0"
 #define PLUGIN_AUTHOR  "Alex Merqury"
 
 #define TASK_TICK 62001
@@ -21,10 +21,13 @@
 new g_previousButtons[33];
 new bool:g_gaussCorrectionPending[33];
 new Float:g_gaussCorrectionTime[33];
+new Float:g_lastPythonShot[33];
+new bool:g_pythonPelletDamage[33];
 
 new g_pcvarEnabled;
 new g_pcvarPythonSelfDamage;
 new g_pcvarPythonSelfDamageLethal;
+new g_pcvarPythonSuppressStockDamage;
 new g_pcvarPythonPellets;
 new g_pcvarPythonPelletDamage;
 new g_pcvarPythonSpread;
@@ -33,26 +36,46 @@ new g_pcvarPythonRecoil;
 new g_pcvarComedyChance;
 new g_pcvarGaussImpulse;
 
-new const g_factoryLines[][] =
+new const g_pythonLines[][] =
 {
-    "MADE IN CHINA",
-    "MADI EN INDIA",
+    "MADE IN CHINA HIGH-PRECISION REVOLVER",
+    "MADI EN INDIA 16-PELLET CALIBRATION",
+    "ACCURACY REPLACED WITH QUANTITY",
+    "RECOIL COMPENSATOR INSTALLED BACKWARDS",
+    "USER DAMAGE IS AN INTENDED FEATURE",
+    "THE BARREL HAS SELECTED SIXTEEN DIRECTIONS",
+    "FACTORY ZERO: SOMEWHERE IN FRONT OF YOU",
+    "QUALITY CONTROL APPROVED THE LOUD PART",
+    "CYLINDER ALIGNMENT IS WITHIN FACTORY TOLERANCE",
+    "PREMIUM BALLISTICS CALCULATED BY ESTIMATION"
+};
+
+new const g_rpgLines[][] =
+{
+    "MADE IN CHINA RPG GUIDANCE",
+    "MADI EN INDIA ROCKET STABILIZER",
     "RPG GUIDANCE PROVIDED BY CONFIDENCE",
     "ROCKET STABILIZER INSTALLED SIDEWAYS",
     "WARRANTY VALID UNTIL LAUNCH",
-    "QUALITY CONTROL NOT INCLUDED",
-    "ASSEMBLED FROM PREMIUM LEFTOVERS",
     "FACTORY TEST RESULT: IT LEFT THE TUBE",
     "TARGETING COMPUTER TRANSLATED THROUGH SIX LANGUAGES",
     "SAFE DISTANCE WAS SOLD SEPARATELY",
     "EXPORT MODEL: DOMESTIC SAFETY REMOVED",
-    "ENGINEERED TO PASS INSPECTION, NOT COMBAT",
-    "THE WARRANTY EXPLODED FIRST",
-    "THIS TRAJECTORY IS WITHIN FACTORY TOLERANCE",
-    "PREMIUM SELF-CORRECTION FEATURE ACTIVATED",
-    "ASSEMBLED WITH CONFIDENCE, NOT MEASUREMENTS",
-    "USER MANUAL PRINTED AFTER PRODUCTION ENDED",
-    "FACTORY ZERO: SOMEWHERE IN FRONT OF YOU"
+    "THIS TRAJECTORY IS WITHIN FACTORY TOLERANCE"
+};
+
+new const g_gaussLines[][] =
+{
+    "MADE IN CHINA MAGNETIC CALIBRATION",
+    "MADI EN INDIA COIL ALIGNMENT",
+    "RECOIL VECTOR INSTALLED UPSIDE DOWN",
+    "MAGNETIC FIELD PASSED VISUAL INSPECTION",
+    "POLARITY LABELS WERE OPTIONAL",
+    "ACCELERATOR COIL SYNCHRONIZED BY EAR",
+    "FACTORY MANUAL RECOMMENDS NOT STANDING BEHIND IT",
+    "ENERGY CONTAINMENT IS WITHIN FACTORY TOLERANCE",
+    "PREMIUM PHYSICS MODULE SOLD SEPARATELY",
+    "DIRECTION OF RECOIL MAY VARY BY REGION"
 };
 
 public plugin_init()
@@ -64,6 +87,7 @@ public plugin_init()
     g_pcvarEnabled = register_cvar("hldm_weaponcomedy_enabled", "1");
     g_pcvarPythonSelfDamage = register_cvar("hldm_weaponcomedy_python_self_damage", "4.0");
     g_pcvarPythonSelfDamageLethal = register_cvar("hldm_weaponcomedy_python_self_damage_lethal", "0");
+    g_pcvarPythonSuppressStockDamage = register_cvar("hldm_weaponcomedy_python_suppress_stock_pvp_damage", "1");
     g_pcvarPythonPellets = register_cvar("hldm_weaponcomedy_python_pellets", "16");
     g_pcvarPythonPelletDamage = register_cvar("hldm_weaponcomedy_python_pellet_damage", "3.0");
     g_pcvarPythonSpread = register_cvar("hldm_weaponcomedy_python_spread", "0.16");
@@ -74,6 +98,7 @@ public plugin_init()
 
     AutoExecConfig(true, "hldm_weapon_comedy");
 
+    RegisterHam(Ham_TakeDamage, "player", "OnPlayerTakeDamage", false);
     register_forward(FM_CmdStart, "OnCmdStart", false);
     set_task(0.05, "TaskTick", TASK_TICK, _, _, "b");
 }
@@ -106,17 +131,44 @@ public OnCmdStart(id, userCmd, randomSeed)
     }
     else if (weapon == W_RPG && (pressed & IN_ATTACK))
     {
-        ShowFactoryLine(id);
+        ShowFactoryLine(id, W_RPG);
     }
     else if (weapon == W_GAUSS && (pressed & IN_ATTACK2))
     {
         g_gaussCorrectionPending[id] = true;
         g_gaussCorrectionTime[id] = now + 0.04;
-        ShowFactoryLine(id);
+        ShowFactoryLine(id, W_GAUSS);
     }
 
     g_previousButtons[id] = buttons;
     return FMRES_IGNORED;
+}
+
+public OnPlayerTakeDamage(victim, inflictor, attacker, Float:damage, damageBits)
+{
+    if (!get_pcvar_num(g_pcvarEnabled)
+        || !get_pcvar_num(g_pcvarPythonSuppressStockDamage)
+        || damage <= 0.0
+        || !(damageBits & DMG_BULLET)
+        || attacker < 1
+        || attacker > MaxClients
+        || attacker == victim
+        || !is_user_connected(attacker)
+        || g_pythonPelletDamage[attacker]
+        || get_user_weapon(attacker) != W_PYTHON)
+    {
+        return HAM_IGNORED;
+    }
+
+    // Keep the native Python shot for ammo, animation and sound, but remove its
+    // exact PvP damage. The actual hit pattern comes from the 16 scatter traces.
+    if (get_gametime() - g_lastPythonShot[attacker] <= 0.10)
+    {
+        SetHamParamFloat(4, 0.0);
+        return HAM_HANDLED;
+    }
+
+    return HAM_IGNORED;
 }
 
 public TaskTick()
@@ -160,6 +212,7 @@ public CmdStatus(id, level, cid)
 
 stock FirePythonScatter(id)
 {
+    g_lastPythonShot[id] = get_gametime();
     ApplyPythonSelfDamage(id);
     ApplyPythonRecoil(id);
 
@@ -169,7 +222,7 @@ stock FirePythonScatter(id)
         FirePythonPellet(id);
     }
 
-    ShowFactoryLine(id);
+    ShowFactoryLine(id, W_PYTHON);
 }
 
 stock ApplyPythonSelfDamage(id)
@@ -252,7 +305,9 @@ stock FirePythonPellet(owner)
         new Float:damage = ClampFloat(get_pcvar_float(g_pcvarPythonPelletDamage), 0.0, 25.0);
         if (damage > 0.0)
         {
+            g_pythonPelletDamage[owner] = true;
             ExecuteHamB(Ham_TakeDamage, hit, owner, owner, damage, DMG_BULLET);
+            g_pythonPelletDamage[owner] = false;
         }
     }
     else
@@ -332,7 +387,7 @@ stock ApplyGaussCorrection(id)
     set_pev(id, pev_velocity, velocity);
 }
 
-stock ShowFactoryLine(id)
+stock ShowFactoryLine(id, weapon)
 {
     if (!is_user_connected(id)
         || random_num(1, 100) > ClampInt(get_pcvar_num(g_pcvarComedyChance), 0, 100))
@@ -340,11 +395,31 @@ stock ShowFactoryLine(id)
         return;
     }
 
-    new line = random_num(0, sizeof g_factoryLines - 1);
-    client_print(id, print_center, "%s", g_factoryLines[line]);
+    new message[96];
+    switch (weapon)
+    {
+        case W_PYTHON:
+        {
+            copy(message, charsmax(message), g_pythonLines[random_num(0, sizeof g_pythonLines - 1)]);
+        }
+        case W_RPG:
+        {
+            copy(message, charsmax(message), g_rpgLines[random_num(0, sizeof g_rpgLines - 1)]);
+        }
+        case W_GAUSS:
+        {
+            copy(message, charsmax(message), g_gaussLines[random_num(0, sizeof g_gaussLines - 1)]);
+        }
+        default:
+        {
+            return;
+        }
+    }
+
+    client_print(id, print_center, "%s", message);
     if (random_num(0, 2) == 0)
     {
-        client_print(id, print_chat, "[FACTORY] %s", g_factoryLines[line]);
+        client_print(id, print_chat, "[FACTORY] %s", message);
     }
 }
 
@@ -353,6 +428,8 @@ stock ResetClient(id)
     g_previousButtons[id] = 0;
     g_gaussCorrectionPending[id] = false;
     g_gaussCorrectionTime[id] = 0.0;
+    g_lastPythonShot[id] = -9999.0;
+    g_pythonPelletDamage[id] = false;
 }
 
 stock bool:NormalizeVector(Float:vector[3])
