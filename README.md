@@ -1,205 +1,245 @@
-# HLDM Anticheat 1.0
+# HLDM Anticheat / Chaos Server
 
-Готовый серверный комплект для обычного Half-Life Deathmatch на GoldSrc:
+**Русский** | [English](README_EN.md) | [Español](README_ES.md)
 
-- `hldm_detector.amxx` наблюдает за серверными `usercmd`, углами прицела, видимостью и выстрелами;
-- `hldm_trap.amxx` изолированно применяет ловушку к выбранному или автоматически выявленному клиенту;
-- PowerShell-установщики разворачивают Metamod, AMX Mod X, оба плагина, конфиги и launcher;
-- GitHub Actions компилирует оба `.sma` официальным AMX Mod X 1.10.0.5479 и собирает готовый ZIP.
+Серверный комплект для Half-Life Deathmatch на GoldSrc: поведенческий античит, административные инструменты, тихие режимы для помеченных клиентов и набор намеренно абсурдных оружейных мутаций.
 
-Система не сканирует процессы клиента, не меняет его файлы и бинды, не отправляет `client_cmd`, не вызывает краши и не банит. Всё происходит внутри матча. Читеру становится плохо именно в игре, а не на чужом компьютере. Неожиданно цивилизованный способ для проекта, посвящённого игровому аду.
+Проект полностью работает на серверной стороне. Он не сканирует процессы клиента, не меняет клиентские файлы и бинды и не требует отдельного клиентского мода. Наказания и оружейные эффекты происходят внутри матча.
 
-## Что ловит детектор
+## Текущая архитектура
 
-Детектор накапливает score по независимым сигналам:
+Базовый слой:
 
-- большой snap-поворот с немедленным выстрелом в игрока;
-- реакция на впервые видимую цель быстрее заданного порога;
-- быстрое переключение выстрелов между разными целями;
-- невозможные углы `usercmd`;
-- нестандартные однопиксельные player-модели обрабатываются отдельным model guard ловушки.
+- `hldm_detector.amxx` анализирует серверные `usercmd`, углы прицела, видимость и выстрелы;
+- `hldm_trap.amxx` применяет ловушку вручную, по SteamID или автоматически после устойчивого detector-score;
+- `hldm_admin_tools.amxx` и `hldm_runtime_guard.amxx` дают администратору локальные инструменты, ESP/x-ray, меню и защитные режимы;
+- дополнительные модули (`hldm_chaos`, `hldm_silent_misery`, `hldm_leader_curse`, `hldm_meat_demon`, Jungian phrase layer и др.) дают отдельные режимы наказания и визуально-комедийные эффекты.
 
-По умолчанию одиночное событие недостаточно. Для автоматического применения нужны минимум два типа сигнала, минимум пять событий и общий score `100`.
+Текущий оружейный слой:
 
-## Что делает ловушка
+- `hldm_weapon_comedy.amxx` — Python/revolver, Gauss и общие заводские шутки;
+- `hldm_weapon_lab.amxx` — quiet modes, tripmine, RPG wobble, snark logic и прочие мутации;
+- `hldm_weapon_payloads.amxx` — delayed payload после satchel, ручной гранаты и настоящего арбалета;
+- `hldm_hornet_policy.amxx` — единственный актуальный владелец жизненного цикла обычных hornet;
+- `hldm_egon_factory.amxx` — сообщения про «самоликвидирующийся пылесос» только для Egon;
+- `hldm_population_manager.amxx` — расчёт бот-популяции и экспериментальный слой мобов, причём потенциально опасные функции сейчас выключены по умолчанию.
 
-Только для помеченного клиента:
+## Важные текущие правила стабильности
 
-- уменьшает исходящий урон;
-- увеличивает входящий урон;
-- иногда съедает прыжок, primary fire и secondary fire;
-- кратко инвертирует стрейф;
-- чередует `SOFT`, ложное `RECOVERY` и `HARD`;
-- показывает персональные диагностические HUD-сообщения;
-- сохраняет валидный SteamID/ValveID в nVault;
-- заменяет нестандартную модель на штатную.
+После нескольких очень наглядных уроков от GoldSrc в проекте действуют жёсткие правила:
 
-Остальные игроки сохраняют обычные урон, ввод и физику. Глобально действует только явно включённый model guard.
+1. **Один тип сущности — один основной runtime-владелец.** Hornet touch/lifetime/cap сейчас контролирует `hldm_hornet_policy`.
+2. Старый `hldm_hornet_fix` должен оставаться выключенным: `hldm_hornetfix_enabled "0"`.
+3. `hldm_weaponlab_manage_hornets "0"`: Weapon Lab не должен параллельно удалять те же hornet.
+4. MP5 underbarrel для обычного игрока остаётся штатным. Он не заменяется ракетами и не создаёт дополнительный payload.
+5. Python/revolver не создаёт 16 настоящих `crossbow_bolt`. Используются 16 zero-entity hitscan-трассеров, поэтому один выстрел не превращается в 16 взрывов и 48 снарков.
+6. Native `monster_zombie` / `monster_headcrab` нельзя безопасно создавать через поздний `DLLFunc_Spawn` после загрузки карты: game DLL пытается прекешировать звуки и может сделать `Host_Error`. Поэтому runtime monster spawning выключен.
+7. Автоматический `addbot` выключен, пока реально не установлен ParaBot или другой bot-DLL, предоставляющий эту команду.
 
-## Самый быстрый запуск на уже установленной Steam-версии
+## Что сейчас происходит с оружием
 
-Открой PowerShell в распакованном пакете:
+### Hornet Gun
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\deploy\setup_hldm_server_windows.ps1 `
-  -HalfLifeRoot "E:\SteamLibrary\steamapps\common\Half-Life" `
-  -RconPassword "СЮДА_СЛОЖНЫЙ_ПАРОЛЬ" `
-  -Hostname "HLDM Anticheat Trap" `
-  -Port 27015 `
-  -MaxPlayers 16 `
-  -OpenFirewall
-```
+- максимум 10 одновременно живых hornet на владельца;
+- 11-я не взрывает старейшую, а просто не сохраняется как дополнительная активная пчела;
+- касание мира не обязано убивать hornet: политика позволяет ей продолжить полёт/отскок;
+- попадание в живую цель вызывает мини-взрыв;
+- оставшаяся hornet взрывается по таймеру до штатного тихого удаления GoldSrc;
+- touch обрабатывается с ограничением частоты, чтобы застрявшая в геометрии сущность не устраивала шторм вызовов.
 
-Скрипт создаёт:
+### Python / revolver
+
+Текущая версия `Weapon Comedy 2.3.0`:
+
+- 16 визуальных hitscan-трассеров с дробовым разбросом;
+- никаких настоящих `crossbow_bolt` от револьвера;
+- configurable pellet damage;
+- физическая/визуальная отдача;
+- небольшое самоповреждение владельца, по умолчанию нелетальное;
+- обычный настоящий арбалет остаётся отдельным оружием и сохраняет свой payload.
+
+### MP5 underbarrel
+
+Для обычного игрока полностью штатный:
+
+- одна штатная контактная граната;
+- без двойных ракет;
+- без дополнительных пчёл;
+- без Weapon Comedy cooldown.
+
+Если игрок помечен режимом `QUIET_BETRAYAL`, его граната может постепенно вернуться к владельцу. Это отдельная скрытая логика наказания, а не глобальная мутация MP5.
+
+### RPG
+
+Используется штатная ракета. Дополнительные ракеты не создаются.
+
+- часть ракет получает умеренный «дефект стабилизатора»/wobble;
+- для помеченного `QUIET_BETRAYAL` игрока ракета может развернуться обратно;
+- заводские сообщения `MADE IN CHINA`, `MADI EN INDIA`, `RPG GUIDANCE PROVIDED BY CONFIDENCE` и аналогичные могут появляться как комедийный слой.
+
+### Egon
+
+Пылесосные сообщения вынесены в отдельный `hldm_egon_factory.amxx` и жёстко маршрутизируются только на weapon id `10`.
+
+MP5 имеет другой weapon id и не должен вызывать сообщения вроде:
 
 ```text
-Half-Life\run_hldm_anticheat_server.bat
+SELF-DESTRUCT VACUUM CLEANER
+MADE IN CHINA VACUUM TECHNOLOGY
+MADI EN INDIA BEAM CALIBRATION
 ```
 
-Запусти этот `.bat`.
+### Hand grenade / satchel / crossbow
 
-## Чистый отдельный сервер через SteamCMD
+- ручная граната после штатного взрыва может выпустить delayed guided hornets;
+- MP5 contact grenade этот payload не получает;
+- satchel-снарки пережидают собственный взрыв скрытыми/неуязвимыми и выпускаются с задержкой;
+- настоящий crossbow impact получает отдельный мини-взрыв и delayed snark payload.
 
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-.\deploy\install_fresh_hlds_windows.ps1 `
-  -ServerRoot "E:\HLDM_Server" `
-  -RconPassword "СЮДА_СЛОЖНЫЙ_ПАРОЛЬ" `
-  -Hostname "HLDM Anticheat Trap" `
-  -Port 27015 `
-  -MaxPlayers 16 `
-  -OpenFirewall `
-  -StartServer
-```
+## Quiet modes
 
-Скрипт устанавливает HLDS AppID 90 через SteamCMD, затем Metamod, AMX Mod X и оба плагина.
-
-## Стандартная GoldSrc-сборка вне Steam
-
-`setup_hldm_server_windows.ps1` работает с обычной структурой, где в корне находятся:
+`hldm_weapon_lab` поддерживает серверные тихие режимы без сообщения цели:
 
 ```text
-hlds.exe
-valve\
+amx_quiet #USERID damage
+amx_quiet #USERID misfire
+amx_quiet #USERID betrayal
+amx_quiet #USERID drift
+amx_quiet #USERID all
+amx_quiet #USERID clear
+amx_quiet_status
 ```
 
-Специальных инструкций по крякам и обходу Steam здесь нет. Для `STEAM_ID_LAN`/`VALVE_ID_LAN` автоматическая ловушка действует в текущем подключении, но постоянная запись в nVault намеренно не создаётся.
+Основные эффекты:
 
-## Проверка после запуска
+- `damage` — очень сильное уменьшение исходящего урона;
+- `misfire` — часть primary/secondary нажатий не проходит до оружия;
+- `betrayal` — некоторые собственные projectile/grenade сущности возвращаются к владельцу;
+- `drift` — небольшой серверный punch-angle drift.
 
-В серверной консоли:
+Административные команды требуют соответствующих AMX Mod X прав.
+
+## Быстрый запуск
+
+Подробная инструкция: [docs/INSTALL_RU.md](docs/INSTALL_RU.md).
+
+Для текущего Steam listen-server варианта общая схема такая:
+
+1. Установить/подготовить Metamod + AMX Mod X в `Half-Life\valve`.
+2. Скопировать актуальные `.amxx` в:
+
+```text
+Half-Life\valve\addons\amxmodx\plugins\
+```
+
+3. Скопировать `.cfg` в:
+
+```text
+Half-Life\valve\addons\amxmodx\configs\plugins\
+```
+
+4. Проверить `plugins.ini` и удалить старые дубли вроде нескольких `hldm_weapon_comedy*.amxx`.
+5. Запустить Half-Life через Steam и создать обычный listen server.
+6. После загрузки карты выполнить:
 
 ```text
 meta list
 amxx version
 amxx modules
 amxx plugins
-amx_ac_status
-amx_trap_list
 ```
 
-Оба плагина должны иметь статус `running`:
+Для оружейного слоя дополнительно:
+
+```text
+amx_weaponcomedy_status
+amx_egonfactory_status
+amx_hornetpolicy_status
+amx_payload_status
+```
+
+## Рекомендуемый относительный порядок модулей
+
+Полный `plugins.ini` зависит от того, какие экспериментальные модули включены, но критические зависимости такие:
 
 ```text
 hldm_trap.amxx
 hldm_detector.amxx
+...
+hldm_weapon_comedy.amxx
+hldm_weapon_lab.amxx
+hldm_weapon_payloads.amxx
+hldm_population_manager.amxx
+hldm_hornet_policy.amxx
+hldm_egon_factory.amxx
 ```
 
-Проверка связи детектора с ловушкой:
+`hldm_hornet_policy` должен загружаться после остальных модулей, способных видеть hornet. Старый `hldm_hornet_fix` либо не загружай, либо оставляй выключенным конфигом.
 
-```text
-status
-amx_ac_testtrap #17
-amx_trap_list
-amx_untrap #17
-```
+## Population Manager
 
-`#17` является серверным `userid`, а не номером слота.
-
-## Команды детектора
-
-```text
-amx_ac_status
-amx_ac_status #17
-amx_ac_reset #17
-amx_ac_reset @all
-amx_ac_mode 0
-amx_ac_mode 1
-amx_ac_mode 2
-amx_ac_testtrap #17
-```
-
-Режимы:
-
-```text
-0 = выключен
-1 = наблюдение и лог без автоматической ловушки
-2 = автоматическое применение ловушки
-```
-
-## Команды ловушки
-
-```text
-amx_trap #17
-amx_untrap #17
-amx_trap_id STEAM_0:1:12345678
-amx_untrap_id STEAM_0:1:12345678
-amx_trap_list
-amx_trap_stop
-amx_trap_start
-```
-
-Все административные команды требуют флаг `l` (`ADMIN_RCON`).
-
-## «Скелеты» и однопиксельные модели
-
-По умолчанию нестандартное значение `model` заменяется на `gordon`, а клиент автоматически становится целью:
+Текущие безопасные значения:
 
 ```cfg
-hldm_trap_force_standard_models "1"
-hldm_trap_auto_trap_custom_models "1"
-hldm_trap_custom_model_threshold "1"
+hldm_population_bots_enabled "0"
+hldm_population_monsters_enabled "0"
 ```
 
-Только замена модели без ловушки:
-
-```cfg
-hldm_trap_auto_trap_custom_models "0"
-```
-
-## Логи
-
-Подробные события детектора:
+Формула целевого количества ботов уже реализована:
 
 ```text
-valve\addons\amxmodx\logs\hldm_anticheat_events.log
+floor((maxplayers - human_reserve) * bot_fraction)
 ```
 
-Состояние целей ловушки сохраняется в nVault для постоянных SteamID/ValveID.
+По умолчанию `human_reserve = 2`, `bot_fraction = 0.50`. Но Half-Life не содержит встроенных ботов. Для `addbot` нужен реальный ParaBot-совместимый bot-DLL.
 
-## Конфиги
+## Конфиги текущего оружейного стека
 
 ```text
-valve\addons\amxmodx\configs\plugins\hldm_detector.cfg
-valve\addons\amxmodx\configs\plugins\hldm_trap.cfg
+configs/plugins/hldm_weapon_comedy.cfg
+configs/plugins/hldm_weapon_lab.cfg
+configs/plugins/hldm_weapon_payloads.cfg
+configs/plugins/hldm_hornet_policy.cfg
+configs/plugins/hldm_egon_factory.cfg
+configs/plugins/hldm_population_manager.cfg
 ```
 
-Подробности:
+## CI и сборка
 
-- `docs/INSTALL_RU.md`
-- `docs/DETECTOR_RU.md`
-- `docs/TEST_PLAN.md`
-- `docs/ARCHITECTURE.md`
+GitHub Actions использует AMX Mod X Compiler `1.10.0.5479`, компилирует **все** `src/*.sma`, запрещает Pawn warnings и складывает все `.amxx`, конфиги и документацию в CI artifact.
 
-## Границы достоверности
-
-Серверный поведенческий детектор не может математически доказать название чит-программы и не видит память клиента. Он выявляет повторяющиеся машинные паттерны и применяет ловушку только после накопления нескольких сигналов. Первую калибровку разумно провести в режиме `1`, затем включить режим `2`.
-
-## Разработка
+Локальная проверка контракта:
 
 ```text
 python tools/check_contract.py
 ```
 
-CI проверяет Python, синтаксис всех PowerShell-скриптов, компилирует оба Pawn-плагина без предупреждений и собирает установочный пакет. Код с клиентскими командами, киком или баном блокируется контрактом.
+## Диагностика вылетов
+
+При падении listen-server нужен хвост консоли **от первой ошибки до `Server shutdown`**. Последние строки после `Host_Error` часто являются уже следствием аварийного shutdown, а не первопричиной.
+
+Особенно важны сообщения:
+
+```text
+Host_Error:
+PF_precache_*:
+ED_Alloc:
+SZ_GetSpace:
+Run time error
+Invalid entity
+```
+
+## Документация
+
+- [Установка на русском](docs/INSTALL_RU.md)
+- [Installation in English](docs/INSTALL_EN.md)
+- [Instalación en español](docs/INSTALL_ES.md)
+- [Detector](docs/DETECTOR_RU.md)
+- [Test plan](docs/TEST_PLAN.md)
+- [Architecture](docs/ARCHITECTURE.md)
+
+## Границы достоверности
+
+Поведенческий детектор не может математически доказать название конкретного чит-клиента и не видит память чужого процесса. Он оценивает серверно наблюдаемые паттерны. Поэтому detector лучше сначала калибровать в observe/log режиме, а автоматические наказания включать после проверки реальных игроков и карт.
+
+И, поскольку это GoldSrc: успешная компиляция означает, что код синтаксически жив. Она не означает, что двадцать сущностей, три старых плагина и древний game DLL внезапно научились уважать причинно-следственные связи.
