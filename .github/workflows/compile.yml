@@ -132,7 +132,7 @@ jobs:
           Copy-Item "build\*.amxx" "$package\addons\amxmodx\plugins\"
           Copy-Item "configs\plugins\*.cfg" "$package\addons\amxmodx\configs\plugins\"
           Copy-Item "deploy\*.ps1" "$package\deploy\"
-          Copy-Item README.md, CHANGELOG.md, LICENSE $package
+          Copy-Item README*.md, CHANGELOG.md, LICENSE $package
           Copy-Item "docs\*.md" "$package\docs\"
 
           $zip = "build\hldm-anticheat-$env:PLUGIN_VERSION.zip"
